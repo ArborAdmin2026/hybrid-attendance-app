@@ -124,25 +124,37 @@ with tab1:
                 st.success(f"**Loaded Successfully:** {file.name}")
             except Exception as e:
                 st.error(f"❌ **Error parsing {file.name}:** {e}")
-
-# --- TAB 2: LIVE IN-CLASSROOM QR SCREEN & EMBEDDED FORM LINK ---
+# --- TAB 2: LIVE IN-CLASSROOM MULTI-ACCESS ATTENDANCE KIOSK ---
 with tab2:
-    st.subheader("🎟️ Live Mobile Check-In Workspace")
+    st.subheader("🎟️ Live Hybrid Classroom Check-In Deck")
+    st.markdown("""
+    Project this tab onto your classroom screen. Students can scan the QR code 
+    to open the site or complete their registration directly on this station device below.
+    """)
     
-    try:
-        query_params = st.query_params
-        is_mobile_view = "mobile" in query_params
-    except Exception:
-        is_mobile_view = False
-
-    if is_mobile_view:
-        st.markdown("### 📱 Mobile Check-In Form")
-        st.info("Fill out these 3 details to log your attendance for today's session.")
+    # Secure Global Base Path Pointer Configuration
+    current_url = "https://share.streamlit.io" 
+    if st.sidebar.button("Fetch My Live App Link Context"):
+        st.sidebar.info("Check your browser address bar at the top of the screen to copy your direct sharing link URL.")
+    
+    # Establish a visual side-by-side grid split
+    col_screen_1, col_screen_2 = st.columns(2)
+    
+    with col_screen_1:
+        st.markdown("#### 📢 Classroom Display Scanner")
+        # Generate the secure QR graphic mapping pointing cleanly to your app register
+        qr_target_url = f"https://quickchart.io{current_url}&size=300"
+        st.image(qr_target_url, caption="Scan with Mobile Camera to Check In", width=280)
         
-        with st.form("mobile_input_form", clear_on_submit=True):
-            m_name = st.text_input("1. Full Name:")
-            m_email = st.text_input("2. Email Address:")
-            m_phone = st.text_input("3. Phone Number:")
+        st.markdown("---")
+        st.markdown("#### 📱 Manual Self-Check-In Console Form")
+        st.info("No smartphone? Type your profile parameters directly into these 3 fields to register:")
+        
+        # Self-Contained 3-Question Attendance Entry Block Form Configuration
+        with st.form("classroom_kiosk_input_form", clear_on_submit=True):
+            m_name = st.text_input("1. Enter Your Full Name:")
+            m_email = st.text_input("2. Enter Your Email Address:")
+            m_phone = st.text_input("3. Enter Your Phone Number:")
             submit_m = st.form_submit_with_button_state("Submit Attendance")
             
             if submit_m:
@@ -151,51 +163,39 @@ with tab2:
                         "Name": m_name.strip(),
                         "Email": m_email.strip().lower(),
                         "Phone Number": m_phone.strip(),
-                        "Join Time": "Mobile Check-In",
-                        "Leave Time": "Mobile Check-In",
+                        "Join Time": "In-Person Kiosk Check-In",
+                        "Leave Time": "In-Person Kiosk Check-In",
                         "Duration": f"{class_duration}m"
                     }
                     st.session_state['qr_form_database'].append(new_log)
-                    st.success("🎉 Check-in successful! You may now close this browser tab.")
+                    st.success(f"🎉 Check-in successful for {m_name.strip()}!")
                 else:
                     st.error("⚠️ Full Name is a required field.")
-    else:
-        current_url = "https://streamlit.app"
-        if st.sidebar.button("Fetch My Live App Link Context"):
-            st.sidebar.info("Make sure to check your browser address bar for your direct sharing link URL prefix.")
-            
-        st.markdown("#### 📢 Project This Screen onto the Classroom Board")
-        st.markdown("Students can scan this QR code using their phone cameras to launch the mobile form instantly.")
+                    
+    with col_screen_2:
+        st.markdown("##### ⚙️ Instructor Attendance Roster Controls")
+        st.markdown(f"**Total Mobile Check-Ins Collected Today:** `{len(st.session_state['qr_form_database'])}` records")
         
-        col_screen_1, col_screen_2 = st.columns(2)
-        with col_screen_1:
-            st.markdown("### 🔗 Scan or Click the Form")
-            st.link_button("📱 Open Mobile Check-In Form Link", f"{current_url}?mobile=true", use_container_width=True)
+        if st.session_state['qr_form_database']:
+            form_df = pd.DataFrame(st.session_state['qr_form_database'])
+            st.dataframe(form_df, use_container_width=True)
             
-            qr_target_url = f"https://quickchart.io/qr?text={current_url}?mobile=true&size=300"
-            st.image(qr_target_url, caption="Classroom Projector View", width=280)
-        with col_screen_2:
-            st.markdown("##### ⚙️ Instructor Attendance Roster Controls")
-            st.markdown(f"**Total Mobile Check-Ins Collected Today:** `{len(st.session_state['qr_form_database'])}` records")
+            # Pack collected registers directly into a local download array block
+            csv_buffer = form_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Generated Offline Roster (offline_responses.csv)",
+                data=csv_buffer,
+                file_name="offline_responses.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
             
-            if st.session_state['qr_form_database']:
-                form_df = pd.DataFrame(st.session_state['qr_form_database'])
-                st.dataframe(form_df, use_container_width=True)
-                
-                csv_buffer = form_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download Generated Offline Roster (offline_responses.csv)",
-                    data=csv_buffer,
-                    file_name="offline_responses.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-                
-                if st.button("🗑️ Reset Session Database", use_container_width=True):
-                    st.session_state['qr_form_database'] = []
-                    st.rerun()
-            else:
-                st.warning("📌 Waiting for incoming student check-ins. Roster table and export options will lock into view here as soon as the first student scans and submits.")
+            if st.button("🗑️ Reset Session Database", use_container_width=True):
+                st.session_state['qr_form_database'] = []
+                st.rerun()
+        else:
+            st.warning("📌 Waiting for incoming student check-ins. Roster table and export options will lock into view here as soon as the first student scans and submits.")
+
 
 # --- DOWNSTREAM CENTRAL DATA RECONSTRUCTION PIPELINE ---
 if uploaded_files and all_dataframes:
