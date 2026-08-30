@@ -125,6 +125,7 @@ with tab1:
             except Exception as e:
                 st.error(f"❌ **Error parsing {file.name}:** {e}")
 
+# --- TAB 2: LIVE IN-CLASSROOM QR SCREEN & EMBEDDED FORM LINK ---
 with tab2:
     st.subheader("🎟️ Live Mobile Check-In Workspace")
     
@@ -159,17 +160,14 @@ with tab2:
                 else:
                     st.error("⚠️ Full Name is a required field.")
     else:
-        # Get your actual deployed app URL from your browser address bar and paste it below
-        # For example: "https://streamlit.app"
         current_url = "https://share.streamlit.io" 
-        
         if st.sidebar.button("Fetch My Live App Link Context"):
             st.sidebar.info("Make sure to check your browser address bar for your direct sharing link URL prefix.")
             
         st.markdown("#### 📢 Project This Screen onto the Classroom Board")
         st.markdown("Students can scan this QR code using their phone cameras to launch the mobile form instantly.")
         
-        # FIXED: Correct QuickChart API structure with /qr?text= parameter matching
+        # FIXED: Corrected QuickChart API parsing context structure string
         qr_target_url = f"https://quickchart.io{current_url}?mobile=true&size=300"
         
         col_screen_1, col_screen_2 = st.columns(2)
@@ -197,11 +195,50 @@ with tab2:
                     st.rerun()
             else:
                 st.warning("📌 Waiting for incoming student check-ins. Roster table and export options will lock into view here as soon as the first student scans and submits.")
+# --- DOWNSTREAM CENTRAL DATA RECONSTRUCTION PIPELINE ---
+if uploaded_files and all_dataframes:
+    master_df = pd.concat(all_dataframes, ignore_index=True)
+    if 'Name' not in master_df.columns: master_df['Name'] = "Unknown Student"
+    master_df['Name'] = master_df['Name'].apply(professional_name_cleaner)
+    master_df = master_df[master_df['Name'].str.strip() != ""]
+    if 'Email' in master_df.columns: master_df['Email'] = master_df['Email'].astype(str).str.strip().str.lower()
+        
+    id_col = st.sidebar.selectbox("Deduplication Key:", options=master_df.columns.tolist(), index=0)
+    initial_count = len(master_df)
+    master_df.dropna(subset=[id_col], inplace=True)
+    
+    if 'Duration (Minutes)' not in master_df.columns: master_df['Duration (Minutes)'] = 0.0
+    if 'Duration' in master_df.columns:
+        def clean_duration_to_mins(val):
+            if pd.isna(val): return 0
+            val_str = str(val).lower().strip()
+            mins = 0
+            try:
+                h = re.search(r'(\d+)\s*h', val_str)
+                m = re.search(r'(\d+)\s*m', val_str)
+                s = re.search(r'(\d+)\s*s', val_str)
+                if h: mins += int(h.group(1)) * 60
+                if m: mins += int(m.group(1))
+                if s: mins += int(s.group(1)) / 60.0
+                return mins
+            except: return 0
+        master_df['Duration (Minutes)'] = master_df['Duration (Minutes)'].fillna(0) + master_df['Duration'].apply(clean_duration_to_mins).fillna(0)
 
-    # --- TAB 3: ANALYTICS GRAPHS ---
+    agg_rules = {col: 'first' for col in master_df.columns if col != id_col}
+    if 'Duration (Minutes)' in agg_rules: agg_rules['Duration (Minutes)'] = 'sum'
+    master_df = master_df.groupby(id_col, as_index=False).agg(agg_rules)
+
+    master_df['Attendance %'] = ((master_df['Duration (Minutes)'] / class_duration) * 100).clip(upper=100.0).round(1)
+    master_df['Participation Status'] = master_df['Attendance %'].apply(lambda x: "🟢 Present" if x >= min_benchmark_pct else "🟡 Partial / Late Leave")
+    
+    # --- TAB 3: FIXED GRAPH ANALYTICS ---
     with tab3:
         st.subheader("📈 Quick Roster Insights")
-        st.bar_chart(master_df['Attendance Type'].value_counts(), color="#4A00E0")
+        
+        # FIXED: Wrap metrics counts inside structured dataframes to bypass the chart syntax errors
+        chart_data_1 = master_df['Attendance Type'].value_counts().reset_index()
+        chart_data_1.columns = ['Source Type', 'Total Count']
+        st.bar_chart(chart_data_1, x='Source Type', y='Total Count', color="#4A00E0")
         
     # --- TAB 4: UNIFIED GRID CONSOLE AND FINAL CONSOLIDATION DOWNLOAD ---
     with tab4:
