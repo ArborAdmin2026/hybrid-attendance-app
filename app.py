@@ -169,7 +169,7 @@ with tab2:
         
         qr_target_url = f"https://qrserver.com{current_url}?mobile=true"
         
-        col_screen_1, col_screen_2 = st.columns()
+        col_screen_1, col_screen_2 = st.columns(2)
         with col_screen_1:
             st.image(qr_target_url, caption="Scan to Check In on Mobile", width=280)
         with col_screen_2:
