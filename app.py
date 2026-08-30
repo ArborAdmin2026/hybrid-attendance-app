@@ -124,12 +124,16 @@ with tab1:
                     df['Attendance Type'] = 'Digital (Teams)'
                 
                 # Global smart alignment dictionary maps
+                # Universal structural mapping to combine Teams and Google Form responses seamlessly
                 rename_dict = {
-                    'Full Name': 'Name', 'Display Name': 'Name', 'User Name': 'Name',
-                    'User Email': 'Email', 'Email Address': 'Email',
+                        'Full Name': 'Name', 'Display Name': 'Name', 'User Name': 'Name', 
+                    'Enter Your Full Name': 'Name', 'Enter Your Name': 'Name', 'Username': 'Name',
+                    'User Email': 'Email', 'Email Address': 'Email', 'Enter Your Email Address': 'Email', 'Email': 'Email',
                     'Join Time': 'Join Time', 'Leave Time': 'Leave Time', 
-                    'Phone': 'Phone Number', 'Phone Number': 'Phone Number'
+                    'Phone': 'Phone Number', 'Phone Number': 'Phone Number', 'Enter Your Phone Number': 'Phone Number'
                 }
+
+           
                 df.rename(columns=rename_dict, inplace=True)
                 all_dataframes.append(df)
                 st.success(f"**Loaded Successfully:** {file.name}")
