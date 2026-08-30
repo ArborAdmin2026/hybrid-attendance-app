@@ -167,7 +167,8 @@ with tab2:
         st.markdown("#### 📢 Project This Screen onto the Classroom Board")
         st.markdown("Students can scan this QR code using their phone cameras to launch the mobile form instantly.")
         
-        qr_target_url = f"https://qrserver.com{current_url}?mobile=true"
+        qr_target_url = f"https://quickchart.io{current_url}?mobile=true&size=300"
+        st.image(qr_target_url, caption="Scan to Check In on Mobile", width=260)
         
         col_screen_1, col_screen_2 = st.columns(2)
         with col_screen_1:
