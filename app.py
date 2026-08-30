@@ -141,13 +141,15 @@ with tab2:
     
     st.markdown("#### 📢 Classroom Display Scanner")
     
-    # Secure API layout generation parameters mapping pointing to your form link
-    qr_api_url = f"https://quickchart.io{google_form_url}&size=300"
-    
     col_screen_1, col_screen_2 = st.columns(2)
     with col_screen_1:
-        st.image(qr_api_url, caption="Scan with Phone Camera to open Google Form", width=280)
-        st.markdown(f"🔗 **Backup Form Hyperlink:** [Open Google Form Manually]({google_form_url})")
+        try:
+            # NATIVE LOADING: Reads your custom uploaded image file right from your GitHub folder
+            st.image("classroom_qr.png", caption="Scan with Phone Camera to open Google Form", width=280)
+        except Exception as e:
+            st.error("⚠️ Local QR code file 'classroom_qr.png' not found in GitHub repository directory.")
+            st.markdown(f"🔗 **Backup Form Hyperlink:** [Open Google Form Manually]({google_form_url})")
+
     with col_screen_2:
         st.markdown("##### 📝 Instructions for the Instructor:")
         st.markdown("""
