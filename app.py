@@ -160,7 +160,7 @@ with tab2:
                 else:
                     st.error("⚠️ Full Name is a required field.")
     else:
-        current_url = "https://share.streamlit.io" 
+        current_url = "https://streamlit.app"
         if st.sidebar.button("Fetch My Live App Link Context"):
             st.sidebar.info("Make sure to check your browser address bar for your direct sharing link URL prefix.")
             
