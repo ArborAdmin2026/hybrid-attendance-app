@@ -51,7 +51,7 @@ with st.expander("ℹ️ How to use this application"):
     2. **Upload Sheets:** Drop your Teams `.csv`/`.xlsx` files or manual physical lists in the upload box.
     3. **Analyze & Filter:** Use **Tab 2** to view visual counts, or **Tab 3** to isolate specific student profiles.
     4. **Download:** Click the action button at the bottom to download a clean summary report.
-    """)
+    """ )
 
 # Sidebar Area Configuration Panels
 st.sidebar.header("⚙️ App Configurations")
@@ -226,4 +226,39 @@ if uploaded_files and all_dataframes:
                 "Highest Attendance %": ('Attendance %', False),
                 "Lowest Attendance %": ('Attendance %', True)
             }
-selected_sort = st.selectbox("Re-Sort Roster Layout Target:", options=list(sort_options.keys()))filtered_df = master_df.copy()if selected_type != "All Sources":filtered_df = filtered_df[filtered_df['Attendance Type'] == selected_type]if selected_status != "All Statuses":filtered_df = filtered_df[filtered_df['Participation Status'] == selected_status]sort_col, sort_ascending = sort_options[selected_sort]filtered_df.sort_values(by=sort_col, ascending=sort_ascending, inplace=True)st.dataframe(filtered_df,use_container_width=True,column_config={"Attendance %": st.column_config.ProgressColumn("Attendance Percent %", format="%.1f%%", min_value=0, max_value=100),"Duration (Minutes)": st.column_config.NumberColumn("Active Time (Mins)", format="%.1f min")})try:processed_data = filtered_df.to_csv(index=False).encode('utf-8')mime_type = "text/csv"except Exception as e:st.error(f"Error preparing download file: {e}")processed_data = b""st.markdown("", unsafe_allow_html=True)if processed_data:st.download_button(label="📥 Download Cleaned & Sorted Master Roster (CSV File)",data=processed_data,file_name="cleaned_hybrid_attendance_report.csv",mime=mime_type,use_container_width=True)
+            selected_sort = st.selectbox("Re-Sort Roster Layout Target:", options=list(sort_options.keys()))
+
+        filtered_df = master_df.copy()
+        if selected_type != "All Sources":
+            filtered_df = filtered_df[filtered_df['Attendance Type'] == selected_type]
+        if selected_status != "All Statuses":
+            filtered_df = filtered_df[filtered_df['Participation Status'] == selected_status]
+            
+        sort_col, sort_ascending = sort_options[selected_sort]
+        filtered_df.sort_values(by=sort_col, ascending=sort_ascending, inplace=True)
+
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True, 
+            column_config={
+                "Attendance %": st.column_config.ProgressColumn("Attendance Percent %", format="%.1f%%", min_value=0, max_value=100),
+                "Duration (Minutes)": st.column_config.NumberColumn("Active Time (Mins)", format="%.1f min")
+            }
+        )
+        
+        try:
+            processed_data = filtered_df.to_csv(index=False).encode('utf-8')
+            mime_type = "text/csv"
+        except Exception as e:
+            st.error(f"Error preparing download file: {e}")
+            processed_data = b""
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        if processed_data:
+            st.download_button(
+                label="📥 Download Cleaned & Sorted Master Roster (CSV File)",
+                data=processed_data,
+                file_name="cleaned_hybrid_attendance_report.csv",
+                mime=mime_type,
+                use_container_width=True
+            )
