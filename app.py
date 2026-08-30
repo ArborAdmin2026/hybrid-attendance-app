@@ -232,7 +232,80 @@ if uploaded_files and all_dataframes:
 
     master_df['Attendance %'] = ((master_df['Duration (Minutes)'] / class_duration) * 100).clip(upper=100.0).round(1)
     master_df['Participation Status'] = master_df['Attendance %'].apply(lambda x: "🟢 Present" if x >= min_benchmark_pct else "🟡 Partial / Late Leave")
+
+    with tab2:
+    st.subheader("🎟️ Live Mobile Check-In Workspace")
     
+    try:
+        query_params = st.query_params
+        is_mobile_view = "mobile" in query_params
+    except Exception:
+        is_mobile_view = False
+
+    if is_mobile_view:
+        st.markdown("### 📱 Mobile Check-In Form")
+        st.info("Fill out these 3 details to log your attendance for today's session.")
+        
+        with st.form("mobile_input_form", clear_on_submit=True):
+            m_name = st.text_input("1. Full Name:")
+            m_email = st.text_input("2. Email Address:")
+            m_phone = st.text_input("3. Phone Number:")
+            submit_m = st.form_submit_with_button_state("Submit Attendance")
+            
+            if submit_m:
+                if m_name.strip() != "":
+                    new_log = {
+                        "Name": m_name.strip(),
+                        "Email": m_email.strip().lower(),
+                        "Phone Number": m_phone.strip(),
+                        "Join Time": "Mobile Check-In",
+                        "Leave Time": "Mobile Check-In",
+                        "Duration": f"{class_duration}m"
+                    }
+                    st.session_state['qr_form_database'].append(new_log)
+                    st.success("🎉 Check-in successful! You may now close this browser tab.")
+                else:
+                    st.error("⚠️ Full Name is a required field.")
+    else:
+        # Get your actual deployed app URL from your browser address bar and paste it below
+        # For example: "https://streamlit.app"
+        current_url = "https://share.streamlit.io" 
+        
+        if st.sidebar.button("Fetch My Live App Link Context"):
+            st.sidebar.info("Make sure to check your browser address bar for your direct sharing link URL prefix.")
+            
+        st.markdown("#### 📢 Project This Screen onto the Classroom Board")
+        st.markdown("Students can scan this QR code using their phone cameras to launch the mobile form instantly.")
+        
+        # FIXED: Correct QuickChart API structure with /qr?text= parameter matching
+        qr_target_url = f"https://quickchart.io{current_url}?mobile=true&size=300"
+        
+        col_screen_1, col_screen_2 = st.columns(2)
+        with col_screen_1:
+            st.image(qr_target_url, caption="Scan to Check In on Mobile", width=280)
+        with col_screen_2:
+            st.markdown("##### ⚙️ Instructor Attendance Roster Controls")
+            st.markdown(f"**Total Mobile Check-Ins Collected Today:** `{len(st.session_state['qr_form_database'])}` records")
+            
+            if st.session_state['qr_form_database']:
+                form_df = pd.DataFrame(st.session_state['qr_form_database'])
+                st.dataframe(form_df, use_container_width=True)
+                
+                csv_buffer = form_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Generated Offline Roster (offline_responses.csv)",
+                    data=csv_buffer,
+                    file_name="offline_responses.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                
+                if st.button("🗑️ Reset Session Database", use_container_width=True):
+                    st.session_state['qr_form_database'] = []
+                    st.rerun()
+            else:
+                st.warning("📌 Waiting for incoming student check-ins. Roster table and export options will lock into view here as soon as the first student scans and submits.")
+
     # --- TAB 3: ANALYTICS GRAPHS ---
     with tab3:
         st.subheader("📈 Quick Roster Insights")
