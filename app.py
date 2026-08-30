@@ -101,9 +101,14 @@ with tab1:
                     else:
                         try:
                             raw_bytes = file.read()
-                            file_text = raw_bytes.decode('utf-8')
-                        except UnicodeDecodeError:
                             file_text = raw_bytes.decode('utf-16')
+                        except Exception:
+                            try:
+                            # Fallback to UTF-8 standard text format profiles
+                                file_text = raw_bytes.decode('utf-8')
+                            except Exception:
+                            # Fail-safe backup decoder hook profile structure mapping
+                                file_text = raw_bytes.decode('latin-1')
                         
                         lines = file_text.splitlines()
                         start_row = 0
