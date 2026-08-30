@@ -45,15 +45,6 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# User Help Documentation Expander Box
-with st.expander("ℹ️ How to use this application"):
-    st.markdown("""
-    1. **Configure Parameters:** Use the left sidebar to enter class duration and required attendance threshold.
-    2. **Upload Sheets:** Drop your Teams `.csv`/`.xlsx` files or manual physical lists in the upload box.
-    3. **Analyze & Filter:** Use **Tab 2** to view visual counts, or **Tab 3** to isolate specific student profiles.
-    4. **Download:** Click the action button at the bottom to download a clean summary report.
-    """)
-
 # Professional Name Cleaning Engine Function
 def professional_name_cleaner(name_val):
     if pd.isna(name_val):
@@ -113,22 +104,31 @@ with tab1:
                 if file.name.endswith('.xlsx'):
                     df = pd.read_excel(file)
                 else:
+                    # Robust Multi-encoding CSV processing
                     try:
-                        df = pd.read_csv(file, encoding='utf-8')
-                        if len(df.columns) < 2:  
-                            raise UnicodeDecodeError("csv", b"", 0, 1, "Fallback")
-                    except (UnicodeDecodeError, pd.errors.ParserError):
-                        try:
-                            file.seek(0)
-                            df = pd.read_csv(file, encoding='utf-16', sep='\t')
-                        except (UnicodeDecodeError, pd.errors.ParserError):
-                            try:
-                                file.seek(0)
-                                df = pd.read_csv(file, encoding='utf-8', sep=None, engine='python', on_bad_lines='skip')
-                            except Exception:
-                                file.seek(0)
-                                df = pd.read_csv(file, encoding='utf-16', sep=None, engine='python', on_bad_lines='skip')
+                        raw_bytes = file.read()
+                        file_text = raw_bytes.decode('utf-8')
+                    except UnicodeDecodeError:
+                        file_text = raw_bytes.decode('utf-16')
+                    
+                    # Split string contents into distinct lines
+                    lines = file_text.splitlines()
+                    
+                    # Filter for section 3 boundary start row context
+                    start_row = 0
+                    for idx, line in enumerate(lines):
+                        if "In-Meeting Activities" in line or "3. In-Meeting Activities" in line:
+                            start_row = idx + 1
+                            break
+                    
+                    # Re-read text strictly isolating active data logs
+                    clean_csv_text = "\n".join(lines[start_row:])
+                    
+                    # Check for tab or comma separation formats
+                    sep_char = '\t' if '\t' in lines[start_row + 1] else ','
+                    df = pd.read_csv(io.StringIO(clean_csv_text), sep=sep_char, on_bad_lines='skip')
                 
+                # Standardize table columns
                 df.columns = df.columns.str.strip().str.title()
                 rename_dict = {
                     'Full Name': 'Name', 'Display Name': 'Name', 'User Name': 'Name',
@@ -137,6 +137,7 @@ with tab1:
                 }
                 df.rename(columns=rename_dict, inplace=True)
                 
+                # Assign structural medium types based on content names
                 fname_lower = file.name.lower()
                 if any(x in fname_lower for x in ["team", "meeting", "online", "chat"]):
                     df['Attendance Type'] = 'Digital (Teams)'
@@ -144,7 +145,7 @@ with tab1:
                     df['Attendance Type'] = 'In-Person (Manual)'
                     
                 all_dataframes.append(df)
-                st.success(f"**Loaded Successfully:** {file.name} ({len(df)} rows found)")
+                st.success(f"**Loaded Successfully:** {file.name} ({len(df)} activity rows found)")
             except Exception as e:
                 st.error(f"❌ **Error parsing {file.name}:** {e}")
     else:
@@ -156,10 +157,12 @@ if uploaded_files and all_dataframes:
     if 'Name' not in master_df.columns:
         master_df['Name'] = "Unknown Student"
     
-    # Run the professional cleaner module on student name data inputs
+    # Run the cleaning pipeline to isolate student profile patterns
     master_df['Name'] = master_df['Name'].apply(professional_name_cleaner)
     
-    # Standardize Email to lowercase to ensure deduplication accuracy
+    # Drop empty baseline formatting rows cleanly
+    master_df = master_df[master_df['Name'].str.strip() != ""]
+    
     if 'Email' in master_df.columns:
         master_df['Email'] = master_df['Email'].astype(str).str.strip().str.lower()
         
@@ -167,38 +170,33 @@ if uploaded_files and all_dataframes:
     id_col = st.sidebar.selectbox(
         "Deduplication Target Key:",
         options=available_columns,
-        index=available_columns.index("Email") if "Email" in available_columns else (available_columns.index("Name") if "Name" in available_columns else 0),
-        help="The database column used to isolate unique students."
+        index=available_columns.index("Name") if "Name" in available_columns else 0,
+        help="Column used to isolate unique students. Selecting Name works best when Emails are blank."
     )
     
     initial_count = len(master_df)
     master_df.dropna(subset=[id_col], inplace=True)
     
+    # Calculate duration blocks dynamically
     if 'Duration' in master_df.columns:
         def clean_duration_to_mins(val):
             if pd.isna(val): return 0
             val_str = str(val).lower().strip()
-            if 'h' in val_str or 'm' in val_str:
+            if 'h' in val_str or 'm' in val_str or 's' in val_str:
                 mins = 0
                 try:
                     import re
                     hours_match = re.search(r'(\d+)\s*h', val_str)
                     mins_match = re.search(r'(\d+)\s*m', val_str)
+                    secs_match = re.search(r'(\d+)\s*s', val_str)
                     if hours_match: mins += int(hours_match.group(1)) * 60
                     if mins_match: mins += int(mins_match.group(1))
+                    if secs_match: mins += int(secs_match.group(1)) / 60.0
                     return mins
                 except: return 0
             try: return float(val)
             except: return 0
         master_df['Duration (Minutes)'] = master_df['Duration'].apply(clean_duration_to_mins)
-    elif 'Join Time' in master_df.columns and 'Leave Time' in master_df.columns:
-        try:
-            master_df['Join Time'] = pd.to_datetime(master_df['Join Time'], errors='coerce')
-            master_df['Leave Time'] = pd.to_datetime(master_df['Leave Time'], errors='coerce')
-            master_df['Duration (Minutes)'] = (master_df['Leave Time'] - master_df['Join Time']).dt.total_seconds() / 60.0
-            master_df['Duration (Minutes)'] = master_df['Duration (Minutes)'].fillna(0).clip(lower=0)
-        except:
-            master_df['Duration (Minutes)'] = float(class_duration)
     else:
         master_df['Duration (Minutes)'] = float(class_duration)
 
@@ -206,7 +204,7 @@ if uploaded_files and all_dataframes:
     for col in master_df.columns:
         if col == id_col: continue
         if col == 'Duration (Minutes)': agg_rules[col] = 'sum'
-        elif col in ['Join Time', 'Leave Time', 'Attendance Type', 'Name', 'Email']: agg_rules[col] = 'first'
+        elif col in ['Join Time', 'Leave Time', 'Attendance Type', 'Name', 'Email', 'Role']: agg_rules[col] = 'first'
     
     if agg_rules:
         master_df = master_df.groupby(id_col, as_index=False).agg(agg_rules)
