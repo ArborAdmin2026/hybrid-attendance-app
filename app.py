@@ -155,7 +155,8 @@ with tab2:
             m_name = st.text_input("1. Enter Your Full Name:")
             m_email = st.text_input("2. Enter Your Email Address:")
             m_phone = st.text_input("3. Enter Your Phone Number:")
-            submit_m = st.form_submit_with_button_state("Submit Attendance")
+            submit_m = st.form_submit_button("Submit Attendance")
+
             
             if submit_m:
                 if m_name.strip() != "":
