@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import re
 
 # Set up page configurations with a modern layout
 st.set_page_config(
@@ -51,7 +52,27 @@ with st.expander("ℹ️ How to use this application"):
     2. **Upload Sheets:** Drop your Teams `.csv`/`.xlsx` files or manual physical lists in the upload box.
     3. **Analyze & Filter:** Use **Tab 2** to view visual counts, or **Tab 3** to isolate specific student profiles.
     4. **Download:** Click the action button at the bottom to download a clean summary report.
-    """ )
+    """)
+
+# Professional Name Cleaning Engine Function
+def professional_name_cleaner(name_val):
+    if pd.isna(name_val):
+        return "Unknown Student"
+    
+    # Convert to string and strip surrounding whitespace
+    text = str(name_val).strip()
+    
+    # 1. Strip out unverified tags, guest tags, or external identifiers inside brackets
+    text = re.sub(r'\s*[\(\[][^\]\)]*unverified[^\]\)]*[\)\]]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\s*[\(\[][^\]\)]*guest[^\]\)]*[\)\]]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\s*[\(\[][^\]\)]*external[^\]\)]*[\)\]]', '', text, flags=re.IGNORECASE)
+    
+    # 2. Strip numbers and trailing punctuation strings
+    text = re.sub(r'[^a-zA-Z\s]', '', text)
+    
+    # 3. Collapse double/triple blank spaces down into a single space, then Title Case it
+    text = " ".join(text.split())
+    return text.title()
 
 # Sidebar Area Configuration Panels
 st.sidebar.header("⚙️ App Configurations")
@@ -134,6 +155,13 @@ if uploaded_files and all_dataframes:
     
     if 'Name' not in master_df.columns:
         master_df['Name'] = "Unknown Student"
+    
+    # Run the professional cleaner module on student name data inputs
+    master_df['Name'] = master_df['Name'].apply(professional_name_cleaner)
+    
+    # Standardize Email to lowercase to ensure deduplication accuracy
+    if 'Email' in master_df.columns:
+        master_df['Email'] = master_df['Email'].astype(str).str.strip().str.lower()
         
     available_columns = master_df.columns.tolist()
     id_col = st.sidebar.selectbox(
