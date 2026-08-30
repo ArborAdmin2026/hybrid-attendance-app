@@ -10,10 +10,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS Injection to make the app look beautiful and professional
+# Custom CSS Injection for professional styling
 st.markdown("""
     <style>
-    /* Gradient banner for the application header */
     .header-banner {
         background: linear-gradient(135deg, #4A00E0 0%, #8E2DE2 100%);
         padding: 30px;
@@ -22,7 +21,6 @@ st.markdown("""
         margin-bottom: 25px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
-    /* Style cards for KPI metrics block */
     div[data-testid="stMetricValue"] {
         font-size: 28px !important;
         font-weight: 700 !important;
@@ -32,10 +30,6 @@ st.markdown("""
         font-size: 14px !important;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-    }
-    /* Add padding to sidebar items */
-    .css-1d391kg {
-        padding-top: 3rem;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -56,14 +50,11 @@ with st.expander("ℹ️ How to use this application"):
     1. **Configure Parameters:** Use the left sidebar to enter class duration and required attendance threshold.
     2. **Upload Sheets:** Drop your Teams `.csv`/`.xlsx` files or manual physical lists in the upload box.
     3. **Analyze & Filter:** Use **Tab 2** to view visual counts, or **Tab 3** to isolate specific student profiles.
-    4. **Download:** Click the action button at the bottom to download a clean, polished Excel summary report.
+    4. **Download:** Click the action button at the bottom to download a clean summary report.
     """)
 
 # Sidebar Area Configuration Panels
 st.sidebar.header("⚙️ App Configurations")
-
-# Classroom Participation Benchmark Setup
-st.sidebar.subheader("⏱️ Session Parameters")
 class_duration = st.sidebar.number_input(
     "Total Class Duration (mins):", 
     min_value=1, 
@@ -98,20 +89,26 @@ with tab1:
         st.markdown("### 📋 File Upload Status Tracking")
         for file in uploaded_files:
             try:
-                # Read file based on extension with automatic encoding fallbacks
                 if file.name.endswith('.xlsx'):
                     df = pd.read_excel(file)
                 else:
                     try:
                         df = pd.read_csv(file, encoding='utf-8')
-                    except UnicodeDecodeError:
-                        file.seek(0)
-                        df = pd.read_csv(file, encoding='utf-16')
+                        if len(df.columns) < 2:  
+                            raise UnicodeDecodeError("csv", b"", 0, 1, "Fallback")
+                    except (UnicodeDecodeError, pd.errors.ParserError):
+                        try:
+                            file.seek(0)
+                            df = pd.read_csv(file, encoding='utf-16', sep='\t')
+                        except (UnicodeDecodeError, pd.errors.ParserError):
+                            try:
+                                file.seek(0)
+                                df = pd.read_csv(file, encoding='utf-8', sep=None, engine='python', on_bad_lines='skip')
+                            except Exception:
+                                file.seek(0)
+                                df = pd.read_csv(file, encoding='utf-16', sep=None, engine='python', on_bad_lines='skip')
                 
-                # Standardize column names (Title Case, trim spaces)
                 df.columns = df.columns.str.strip().str.title()
-                
-                # Smart automatic column mapping structure for Teams defaults
                 rename_dict = {
                     'Full Name': 'Name', 'Display Name': 'Name', 'User Name': 'Name',
                     'User Email': 'Email', 'Email Address': 'Email',
@@ -119,7 +116,6 @@ with tab1:
                 }
                 df.rename(columns=rename_dict, inplace=True)
                 
-                # Determine class source profile by checking string name pattern
                 fname_lower = file.name.lower()
                 if any(x in fname_lower for x in ["team", "meeting", "online", "chat"]):
                     df['Attendance Type'] = 'Digital (Teams)'
@@ -127,36 +123,29 @@ with tab1:
                     df['Attendance Type'] = 'In-Person (Manual)'
                     
                 all_dataframes.append(df)
-                st.toast(f"Loaded: {file.name}", icon="✅")
                 st.success(f"**Loaded Successfully:** {file.name} ({len(df)} rows found)")
             except Exception as e:
                 st.error(f"❌ **Error parsing {file.name}:** {e}")
     else:
-        st.info("💡 Please upload one or more CSV or Excel attendance logs to populate the dynamic dashboard view panels.")
+        st.info("💡 Please upload one or more CSV or Excel attendance logs to populate the dashboard.")
 
-# Execute downstream calculations only if files exist in session memory
 if uploaded_files and all_dataframes:
     master_df = pd.concat(all_dataframes, ignore_index=True)
     
-    # Ensure baseline critical key fields exist structurally
     if 'Name' not in master_df.columns:
         master_df['Name'] = "Unknown Student"
         
     available_columns = master_df.columns.tolist()
-    
-    # Dynamically select deduplication ID column in sidebar context safely
     id_col = st.sidebar.selectbox(
         "Deduplication Target Key:",
         options=available_columns,
         index=available_columns.index("Email") if "Email" in available_columns else (available_columns.index("Name") if "Name" in available_columns else 0),
-        help="The database column used to isolate unique students (Email address is highly recommended)."
+        help="The database column used to isolate unique students."
     )
     
-    # --- CORE AUTOMATED PIPELINE PROCESSOR ---
     initial_count = len(master_df)
     master_df.dropna(subset=[id_col], inplace=True)
     
-    # Convert duration blocks to standard float point minutes metrics
     if 'Duration' in master_df.columns:
         def clean_duration_to_mins(val):
             if pd.isna(val): return 0
@@ -185,7 +174,6 @@ if uploaded_files and all_dataframes:
     else:
         master_df['Duration (Minutes)'] = float(class_duration)
 
-    # Compile data across unique identifier indices
     agg_rules = {}
     for col in master_df.columns:
         if col == id_col: continue
@@ -197,7 +185,6 @@ if uploaded_files and all_dataframes:
     else:
         master_df.drop_duplicates(subset=[id_col], keep='first', inplace=True)
 
-    # Compute final percentage performance profiles
     master_df['Attendance %'] = (master_df['Duration (Minutes)'] / class_duration) * 100
     master_df['Attendance %'] = master_df['Attendance %'].clip(upper=100.0).round(1)
     master_df['Participation Status'] = master_df['Attendance %'].apply(
@@ -207,27 +194,36 @@ if uploaded_files and all_dataframes:
     final_count = len(master_df)
     removed_count = initial_count - final_count
 
-    # Populate Tab 2: Visual Insights & Summary Indicators
     with tab2:
         st.subheader("📈 Quick Roster Insights")
-        
-        # Draw metric visual component badges inside clean container borders
         with st.container():
             kpi1, kpi2, kpi3, kpi4 = st.columns(4)
             kpi1.metric("Total Logs Extracted", initial_count)
             kpi2.metric("Redundant Items Cleaned", removed_count)
-            kpi3.metric("Passed Attendance Benchmark", len(master_df[master_df['Participation Status'] == "🟢 Present"]))
-            kpi4.metric("Flagged Attendance (Under Threshold)", len(master_df[master_df['Participation Status'] == "🟡 Partial / Late Leave"]))
+            kpi3.metric("Passed Benchmark", len(master_df[master_df['Participation Status'] == "🟢 Present"]))
+            kpi4.metric("Flagged Attendance", len(master_df[master_df['Participation Status'] == "🟡 Partial / Late Leave"]))
         
         st.markdown("---")
-        
-        # Split analytics visually using column graphs layout structure
         g_col1, g_col2 = st.columns(2)
         with g_col1:
             st.markdown("##### Attendance Location Source Breakdown")
-            source_counts = master_df['Attendance Type'].value_counts()
-            st.bar_chart(source_counts, color="#4A00E0")
+            st.bar_chart(master_df['Attendance Type'].value_counts(), color="#4A00E0")
         with g_col2:
             st.markdown("##### Classroom Participation Status Ratios")
-            status_counts = master_df['Participation Status'].value_counts()
-            st.bar_chart(status_counts, color="#8E2DE2")
+            st.bar_chart(master_df['Participation Status'].value_counts(), color="#8E2DE2")
+
+    with tab3:
+        st.subheader("🔍 Interactive Roster Grid Control Deck")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            selected_type = st.selectbox("Isolate Class Medium Source:", options=["All Sources"] + list(master_df['Attendance Type'].unique()))
+        with c2:
+            selected_status = st.selectbox("Isolate Engagement Status:", options=["All Statuses", "🟢 Present", "🟡 Partial / Late Leave"])
+        with c3:
+            sort_options = {
+                "Alphabetical (Name A-Z)": ('Name', True),
+                "Alphabetical (Name Z-A)": ('Name', False),
+                "Highest Attendance %": ('Attendance %', False),
+                "Lowest Attendance %": ('Attendance %', True)
+            }
+selected_sort = st.selectbox("Re-Sort Roster Layout Target:", options=list(sort_options.keys()))filtered_df = master_df.copy()if selected_type != "All Sources":filtered_df = filtered_df[filtered_df['Attendance Type'] == selected_type]if selected_status != "All Statuses":filtered_df = filtered_df[filtered_df['Participation Status'] == selected_status]sort_col, sort_ascending = sort_options[selected_sort]filtered_df.sort_values(by=sort_col, ascending=sort_ascending, inplace=True)st.dataframe(filtered_df,use_container_width=True,column_config={"Attendance %": st.column_config.ProgressColumn("Attendance Percent %", format="%.1f%%", min_value=0, max_value=100),"Duration (Minutes)": st.column_config.NumberColumn("Active Time (Mins)", format="%.1f min")})try:processed_data = filtered_df.to_csv(index=False).encode('utf-8')mime_type = "text/csv"except Exception as e:st.error(f"Error preparing download file: {e}")processed_data = b""st.markdown("", unsafe_allow_html=True)if processed_data:st.download_button(label="📥 Download Cleaned & Sorted Master Roster (CSV File)",data=processed_data,file_name="cleaned_hybrid_attendance_report.csv",mime=mime_type,use_container_width=True)
