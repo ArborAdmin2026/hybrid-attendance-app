@@ -2,67 +2,42 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
-import qrcode
 from io import BytesIO
 
-DB_NAME = "attendance_pro.db"
+DB="attendancehub.db"
 
-st.set_page_config(page_title="AttendanceHub Pro", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="AttendanceHub Pro", layout="wide")
 
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS students(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)")
-    cur.execute("CREATE TABLE IF NOT EXISTS attendance(date TEXT, student_name TEXT, mode TEXT, status TEXT)")
-    conn.commit()
-    conn.close()
+conn=sqlite3.connect(DB)
+conn.execute("CREATE TABLE IF NOT EXISTS attendance(att_date TEXT, student_name TEXT, mode TEXT, status TEXT)")
+conn.commit()
 
-init_db()
+st.title("AttendanceHub Pro - Reports")
 
-st.title("🎓 AttendanceHub Pro")
-menu = st.sidebar.radio("Navigation", ["Dashboard","Students","QR Attendance"])
+df=pd.read_sql_query("SELECT * FROM attendance", conn)
+conn.close()
 
-if menu == "Students":
-    names = st.text_area("Paste student names (one per line)")
-    if st.button("Save Students"):
-        conn = sqlite3.connect(DB_NAME)
-        cur = conn.cursor()
-        for n in names.splitlines():
-            try:
-                cur.execute("INSERT OR IGNORE INTO students(name) VALUES(?)", (n.strip(),))
-            except:
-                pass
-        conn.commit()
-        conn.close()
-        st.success("Saved")
+st.dataframe(df, use_container_width=True)
 
-elif menu == "QR Attendance":
-    today = datetime.now().strftime("%Y-%m-%d")
-    qr_text = f"ATTENDANCE|{today}"
-    img = qrcode.make(qr_text)
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    st.image(buf.getvalue())
-    st.code(qr_text)
+col1,col2=st.columns(2)
 
-    conn = sqlite3.connect(DB_NAME)
-    students = pd.read_sql_query("SELECT name FROM students", conn)
-    conn.close()
+with col1:
+    st.download_button(
+        'Download CSV',
+        df.to_csv(index=False).encode('utf-8'),
+        file_name='attendance_report.csv',
+        mime='text/csv'
+    )
 
-    if len(students):
-        student = st.selectbox("Student", students['name'])
-        if st.button("Mark Attendance"):
-            conn = sqlite3.connect(DB_NAME)
-            conn.execute("INSERT INTO attendance VALUES (?,?,?,?)", (today, student, 'QR', 'Present'))
-            conn.commit()
-            conn.close()
-            st.success('Attendance Marked')
+with col2:
+    excel_buffer=BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Attendance', index=False)
+    excel_buffer.seek(0)
 
-else:
-    conn = sqlite3.connect(DB_NAME)
-    s = pd.read_sql_query("SELECT * FROM students", conn)
-    a = pd.read_sql_query("SELECT * FROM attendance", conn)
-    conn.close()
-    st.metric("Total Students", len(s))
-    st.metric("Attendance Records", len(a))
-    st.dataframe(a, use_container_width=True)
+    st.download_button(
+        'Download Excel',
+        excel_buffer.getvalue(),
+        file_name=f"Attendance_Report_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
