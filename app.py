@@ -2,17 +2,19 @@ import pandas as pd
 import streamlit as st
 import sqlite3
 import re
+from io import StringIO
 from datetime import datetime
 
-# Database Configuration Context
-DB_NAME = "hybrid_attendance.db"
+# Database Configuration
+DB_NAME = "hybrid_attendance_clean.db"
 
 def init_db():
-    """Initializes local storage loops for persistence."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+    # Roster table to hold student profile information
     c.execute('''CREATE TABLE IF NOT EXISTS roster 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)''')
+    # Offline presence log for a specific date
     c.execute('''CREATE TABLE IF NOT EXISTS offline_logs 
                  (date TEXT, name TEXT, status TEXT)''')
     conn.commit()
@@ -21,7 +23,7 @@ def init_db():
 init_db()
 
 def parse_teams_duration(duration_str):
-    """Converts standard Teams text frames ('1h 24m 42s' or '3m 22s') into clean integer minutes."""
+    """Converts standard Teams text frames ('1h 24m 42s', '47m 48s', '3m 22s') into clean integer minutes."""
     if pd.isna(duration_str) or not str(duration_str).strip():
         return 0
     duration_str = str(duration_str).lower().strip()
@@ -29,7 +31,7 @@ def parse_teams_duration(duration_str):
     hours = 0
     minutes = 0
     
-    # Trace component sequences using regex loops
+    # Trace hour and minute metrics via explicit regex matching groups
     h_match = re.search(r'(\d+)\s*h', duration_str)
     m_match = re.search(r'(\d+)\s*m', duration_str)
     
@@ -38,205 +40,229 @@ def parse_teams_duration(duration_str):
     if m_match:
         minutes = int(m_match.group(1))
     elif 'h' not in duration_str and 's' in duration_str:
+        # Check if single integer represents minutes or seconds safely
         digit_match = re.search(r'^\s*(\d+)\s*s', duration_str)
         if not digit_match:
-            m_fallback = re.findall(r'\d+', duration_str)
-            if m_fallback:
-                minutes = int(m_fallback[0])
+            digits = re.findall(r'\d+', duration_str)
+            if digits:
+                minutes = int(digits[0])
                 
     return (hours * 60) + minutes
 
-st.set_page_config(page_title="Data Analytics Attendance Console", layout="wide")
-st.title("📊 Data Analytics Hybrid Attendance Engine")
+st.set_page_config(page_title="Hybrid Attendance Hub", layout="wide")
+st.title("📊 Hybrid Class Attendance Dashboard")
+st.caption("A clean tool built from scratch to clean complex Microsoft Teams file exports and log offline students.")
 
-# --- SIDEBAR CONTROL MECHANISMS ---
-st.sidebar.header("🗓️ Navigation & Options")
-menu = st.sidebar.radio("Go To Workspace:", ["Student Check-in Portal", "Logs & Teams Cleaner Pipeline", "Master Roster Management"])
+# Main Application Menu Router
+menu = st.tabs(["🚶‍♂️ Offline Student Check-In", "💻 Teams Log Processor & Merger", "🗃️ Master Class Roster"])
 
-selected_date = st.sidebar.date_input("Class Session Date", datetime.now()).strftime("%Y-%m-%d")
-noise_filter = st.sidebar.slider("Minimum Online Minutes (Noise Threshold)", 0, 45, 10)
-
-# --- WORKSPACE 1: STUDENT CHECK-IN PORTAL ---
-if menu == "Student Check-in Portal":
-    st.header("🚶‍♂️ Physical Classroom Presence Check-In")
-    st.caption("Mark offline students attending live in the room.")
+# --- TAB 1: OFFLINE CHECK-IN PORTAL ---
+with menu[0]:
+    st.header("🚶‍♂️ Classroom Attendance Registry")
+    st.markdown("Use this panel to mark attendance for students physically sitting in your classroom today.")
+    
+    selected_date = st.date_input("Target Attendance Date", datetime.now(), key="offline_date_picker").strftime("%Y-%m-%d")
     
     conn = sqlite3.connect(DB_NAME)
     roster_list = pd.read_sql_query("SELECT name FROM roster ORDER BY name ASC", conn)['name'].tolist()
-    saved_offline = pd.read_sql_query("SELECT name FROM offline_logs WHERE date=?", conn, params=(selected_date,))['name'].tolist()
+    saved_offline_today = pd.read_sql_query("SELECT name FROM offline_logs WHERE date=?", conn, params=(selected_date,))['name'].tolist()
     conn.close()
     
     if not roster_list:
-        st.info("⚠️ Master student database profile is empty. Please navigate to the 'Master Roster Management' tab first.")
+        st.info("💡 The master student roster directory is completely empty. Please add your students in the 'Master Class Roster' tab first.")
     else:
-        st.write("Select the boxes next to students physically present in class:")
+        st.write("### Check the box for each student present in the room:")
         
-        cols = st.columns(3)
-        current_present = []
+        # Build 3 columns for balanced UI visualization
+        grid_cols = st.columns(3)
+        current_classroom_present = []
         
-        for idx, student in enumerate(roster_list):
-            with cols[idx % 3]:
-                is_checked = student in saved_offline
-                if st.checkbox(student, value=is_checked, key=f"off_{student}_{selected_date}"):
-                    current_present.append(student)
-        
-        if st.button("💾 Save Classroom Attendance Logs", type="primary"):
+        for idx, student_name in enumerate(roster_list):
+            with grid_cols[idx % 3]:
+                is_checked = student_name in saved_offline_today
+                if st.checkbox(student_name, value=is_checked, key=f"check_{student_name}_{selected_date}"):
+                    current_classroom_present.append(student_name)
+                    
+        st.markdown("---")
+        if st.button("💾 Save Offline Attendance Logs", type="primary", use_container_width=True):
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
+            # Clear previous entries for this date to support live data updates
             c.execute("DELETE FROM offline_logs WHERE date=?", (selected_date,))
-            for name in current_present:
+            for name in current_classroom_present:
                 c.execute("INSERT INTO offline_logs (date, name, status) VALUES (?, ?, 'Present (Offline)')", (selected_date, name))
             conn.commit()
             conn.close()
-            st.success(f"Successfully recorded {len(current_present)} classroom students for {selected_date}!")
+            st.success(f"Recorded {len(current_classroom_present)} offline students for session date: {selected_date}!")
+            st.rerun()
 
-# --- WORKSPACE 2: TEAMS PIPELINE ENGINE ---
-elif menu == "Logs & Teams Cleaner Pipeline":
-    st.header("💻 Teams Log Cleaner & Multi-Stream Data Joiner")
-    st.markdown("Upload the messy text/CSV dump exported directly from your Microsoft Teams session.")
+# --- TAB 2: TEAMS PIPELINE ENGINE ---
+with menu[1]:
+    st.header("💻 Microsoft Teams CSV Processing Pipeline")
+    st.markdown("Drop your multi-section Teams attendance export text or CSV file here to remove duplicate entries, strip noise, and compile classroom data columns.")
+    
+    target_date = st.date_input("Match Session Date", datetime.now(), key="pipeline_date_picker").strftime("%Y-%m-%d")
+    noise_threshold = st.slider("Online Noise Aggregation Filter (Minimum Minutes Required)", 0, 60, 10, help="Any student whose total combined login duration is less than this value will be labeled absent/noise.")
     
     uploaded_file = st.file_uploader("Upload Raw Teams CSV / TXT File", type=["csv", "txt"])
     
     if uploaded_file is not None:
         try:
-            raw_bytes = uploaded_file.read()
-            raw_text = raw_bytes.decode("utf-8", errors="ignore")
-            lines = raw_text.splitlines()
+            # Parse file text string framework
+            raw_text_data = uploaded_file.read().decode("utf-8", errors="ignore")
+            lines = raw_text_data.splitlines()
             
-            participant_line_idx = None
-            activity_line_idx = None
+            # Find bounds for '2. Participants'
+            section_start_idx = None
+            section_end_idx = None
             
-            for index, line in enumerate(lines):
-                if "2. Participants" in line:
-                    participant_line_idx = index
-                elif "3. In-Meeting Activities" in line or "3. In-meeting activities" in line:
-                    activity_line_idx = index
-            
-            if participant_line_idx is None:
-                st.error("Error: Could not locate Section 2 ('2. Participants') inside the file.")
+            for index, current_line in enumerate(lines):
+                if "2. Participants" in current_line:
+                    section_start_idx = index
+                elif "3. In-Meeting Activities" in current_line or "3. In-meeting activities" in current_line:
+                    section_end_idx = index
+                    
+            if section_start_idx is None:
+                st.error("❌ Invalid Layout Structure: Could not locate section '2. Participants' within the file matrix.")
             else:
-                end_idx = activity_line_idx if activity_line_idx else len(lines)
-                section_2_lines = lines[participant_line_idx+1 : end_idx]
+                # Segment section text lines safely
+                end_bound = section_end_idx if section_end_idx else len(lines)
+                participant_lines = lines[section_start_idx + 1 : end_bound]
+                clean_csv_string = "\n".join([line for line in participant_lines if line.strip()])
                 
-                clean_section_2 = "\n".join([l for l in section_2_lines if l.strip()])
+                # Load section into dataframe using tab or fallback comma delimiters
+                df_teams = pd.read_csv(StringIO(clean_csv_string), sep='\t')
+                if df_teams.shape[0] <= 1:
+                    df_teams = pd.read_csv(StringIO(clean_csv_string), sep=',')
+                    
+                # Clean structural headers
+                df_teams.columns = [str(col).strip() for col in df_teams.columns]
                 
-                from io import StringIO
-                df_participants = pd.read_csv(StringIO(clean_section_2), sep='\t')
+                # Check for Name and Duration fields
+                name_col = next((c for c in df_teams.columns if 'name' in c.lower()), None)
+                duration_col = next((c for c in df_teams.columns if 'dur' in c.lower()), None)
                 
-                if df_participants.shape[1] <= 1:
-                    df_participants = pd.read_csv(StringIO(clean_section_2), sep=',')
-                
-                df_participants.columns = [str(c).strip() for c in df_participants.columns]
-                
-                name_field = next((c for c in df_participants.columns if 'name' in c.lower()), None)
-                duration_field = next((c for c in df_participants.columns if 'dur' in c.lower()), None)
-                
-                if not name_field or not duration_field:
-                    st.error(f"Failed to isolate Name or Duration fields. Headers found: {list(df_participants.columns)}")
+                if not name_col or not duration_col:
+                    st.error(f"❌ Matching Fields Failed. Ensure 'Name' and 'In-Meeting Duration' fields exist. Columns found: {list(df_teams.columns)}")
                 else:
-                    cleaned_rows = []
-                    for _, row in df_participants.iterrows():
-                        raw_name = str(row[name_field]).strip()
-                        clean_name = re.sub(r'\s*\(unverified\)\s*', '', raw_name, flags=re.IGNORECASE).strip()
+                    parsed_rows_accumulator = []
+                    
+                    for _, row in df_teams.iterrows():
+                        raw_name_string = str(row[name_col]).strip()
                         
-                        if "meeting with data analytics" in clean_name.lower() or not clean_name:
+                        # Strip default Teams unverified flags and brackets
+                        clean_student_name = re.sub(r'\s*\(unverified\)\s*', '', raw_name_string, flags=re.IGNORECASE).strip()
+                        
+                        # Filter out internal organization session name labels
+                        if "meeting with data analytics" in clean_student_name.lower() or not clean_student_name or clean_student_name == "nan":
                             continue
                             
-                        raw_duration = str(row[duration_field])
-                        calculated_minutes = parse_teams_duration(raw_duration)
+                        raw_duration_string = str(row[duration_col])
+                        total_minutes = parse_teams_duration(raw_duration_string)
                         
-                        cleaned_rows.append({
-                            "Student Name": clean_name,
-                            "Online Duration (Mins)": calculated_minutes
+                        parsed_rows_accumulator.append({
+                            "Student Name": clean_student_name,
+                            "Online Duration (Mins)": total_minutes
                         })
+                        
+                    raw_dataframe = pd.DataFrame(parsed_rows_accumulator)
                     
-                    raw_parsed_df = pd.DataFrame(cleaned_rows)
-                    
-                    online_summary = raw_parsed_df.groupby("Student Name").agg({
+                    # Group by Name to fix connection dropdown duplicates
+                    online_summary = raw_dataframe.groupby("Student Name").agg({
                         "Online Duration (Mins)": "sum"
                     }).reset_index()
                     
+                    # Mark online thresholds
                     online_summary["Status"] = online_summary["Online Duration (Mins)"].apply(
-                        lambda x: "Present (Online)" if x >= noise_filter else "Absent / Dropped Noise"
+                        lambda x: "Present (Online)" if x >= noise_threshold else "Absent (Dropped/Noise)"
                     )
                     
-                    valid_online_df = online_summary[online_summary["Status"] == "Present (Online)"].copy()
+                    # Isolate actual present online students
+                    valid_online_only = online_summary[online_summary["Status"] == "Present (Online)"].copy()
                     
-                    st.subheader("🟢 Isolated Active Online Attendees")
-                    st.dataframe(valid_online_df, use_container_width=True)
+                    st.subheader("🟢 Cleaned Online Attendance Records")
+                    st.dataframe(valid_online_only, use_container_width=True)
                     
+                    # --- CONSOLIDATE MASTER DATA STREAMS ---
                     st.markdown("---")
-                    st.subheader("🔀 Consolidated Hybrid Master Matrix")
+                    st.subheader("🔀 Merged Master Attendance Report Sheet")
                     
+                    # Pull offline logs from local database storage matrix
                     conn = sqlite3.connect(DB_NAME)
                     offline_df = pd.read_sql_query(
                         "SELECT name as 'Student Name', status as 'Status' FROM offline_logs WHERE date=?", 
-                        conn, params=(selected_date,)
+                        conn, params=(target_date,)
                     )
-                    full_roster = pd.read_sql_query("SELECT name as 'Student Name' FROM roster", conn)
+                    # Pull full structural roster to check for absent profiles
+                    master_class_roster = pd.read_sql_query("SELECT name as 'Student Name' FROM roster", conn)
                     conn.close()
                     
                     offline_df["Online Duration (Mins)"] = 0
                     offline_df = offline_df[["Student Name", "Online Duration (Mins)", "Status"]]
                     
-                    combined_present_df = pd.concat([valid_online_df, offline_df], ignore_index=True)
+                    # Concatenate datasets
+                    all_present_records = pd.concat([valid_online_only, offline_df], ignore_index=True)
                     
-                    combined_present_summary = combined_present_df.groupby("Student Name").agg({
+                    # Resolve cross-platform duplicate checks if a user connected via phone while in the classroom
+                    final_presence_summary = all_present_records.groupby("Student Name").agg({
                         "Online Duration (Mins)": "max",
-                        "Status": lambda x: "Present (Hybrid/Both)" if len(set(x)) > 1 else list(x)[0]
+                        "Status": lambda flags: "Present (Hybrid/Both)" if len(set(flags)) > 1 else list(flags)[0]
                     }).reset_index()
                     
-                    master_attendance_sheet = pd.merge(full_roster, combined_present_summary, on="Student Name", how="left")
-                    master_attendance_sheet["Status"] = master_attendance_sheet["Status"].fillna("Absent")
-                    master_attendance_sheet["Online Duration (Mins)"] = master_attendance_sheet["Online Duration (Mins)"].fillna(0).astype(int)
-                    master_attendance_sheet.insert(0, "Session Date", selected_date)
+                    # Merge against total structural roster to uncover true absent users
+                    compiled_master_report = pd.merge(master_class_roster, final_presence_summary, on="Student Name", how="left")
+                    compiled_master_report["Status"] = compiled_master_report["Status"].fillna("Absent")
+                    compiled_master_report["Online Duration (Mins)"] = compiled_master_report["Online Duration (Mins)"].fillna(0).astype(int)
+                    compiled_master_report.insert(0, "Session Date", target_date)
                     
-                    st.dataframe(master_attendance_sheet, use_container_width=True)
+                    st.dataframe(compiled_master_report, use_container_width=True)
                     
-                    csv_output = master_attendance_sheet.to_csv(index=False).encode('utf-8')
+                    # Download Action Controller
+                    final_csv_output = compiled_master_report.to_csv(index=False).encode('utf-8')
                     st.download_button(
-                        label="📥 Download Unified Master Attendance CSV",
-                        data=csv_output,
-                        file_name=f"Hybrid_Attendance_Report_{selected_date}.csv",
+                        label="📥 Download Master Hybrid Attendance CSV Sheet",
+                        data=final_csv_output,
+                        file_name=f"Unified_Hybrid_Attendance_{target_date}.csv",
                         mime="text/csv",
-                        type="primary"
+                        type="primary",
+                        use_container_width=True
                     )
-                    
         except Exception as e:
-            st.error(f"Parsing Fault Trace: {str(e)}. Please check your Teams CSV file configuration schema.")
+            st.error(f"Execution Error Parsing Script: {str(e)}")
 
-# --- WORKSPACE 3: ROSTER STORAGE DIRECTORY ---
-elif menu == "Master Roster Management":
+# --- TAB 3: ROSTER PROFILES ---
+with menu[2]:
     st.header("🗃️ Master Class Roster Management")
-    st.caption("Register student identity frames here so the system can audit absence logs correctly.")
+    st.markdown("Register your students here once. This allows the system to cross-reference your Microsoft Teams logs and offline registries to identify who is absent.")
     
-    c_import, c_display = st.columns()
+    col_entry, col_preview = st.columns([1, 1])
     
-    with c_import:
-        st.subheader("Bulk Import Class List")
-        bulk_text = st.text_area("Paste Student Names (One name per line text format):", height=200, placeholder="Example:\nJagtap Abhirucha\nSwapnil\nSaurabh Kumbhar")
+    with col_entry:
+        st.subheader("Bulk Import Roster")
+        bulk_names_input = st.text_area("Paste Student Names (One full name per line):", height=200, placeholder="Example:\nJagtap Abhirucha\nSwapnil\nAjay gadade\nSaurabh Kumbhar")
         
-        if st.button("Bulk Register Students", type="primary"):
-            if bulk_text.strip():
-                lines_to_add = [line.strip() for line in bulk_text.split("\n") if line.strip()]
-                added_counter = 0
+        if st.button("Bulk Register Class List", type="primary"):
+            if bulk_names_input.strip():
+                formatted_lines = [line.strip() for line in bulk_names_input.split("\n") if line.strip()]
+                new_records_counter = 0
                 
                 conn = sqlite3.connect(DB_NAME)
                 c = conn.cursor()
-                for student_name in lines_to_add:
+                for individual_name in formatted_lines:
                     try:
-                        c.execute("INSERT INTO roster (name) VALUES (?)", (student_name,))
-                        added_counter += 1
+                        c.execute("INSERT INTO roster (name) VALUES (?)", (individual_name,))
+                        new_records_counter += 1
                     except sqlite3.IntegrityError:
-                        pass
+                        pass # Ignore names that already exist
                 conn.commit()
                 conn.close()
-                st.success(f"Successfully processed database updates. Registered {added_counter} new records.")
+                st.success(f"Successfully processed database updates! Registered {new_records_counter} new students to the roster directory.")
                 st.rerun()
             else:
-                st.error("Input text canvas context cannot be blank.")
+                st.error("Please paste your student list context text box before clicking register.")
                 
-        if st.button("🗑️ Wipe Entire Database Roster", type="secondary", help="Deletes all student profiles from local records"):
+        st.markdown("---")
+        if st.button("🗑️ Wipe Entire Master Roster Database", type="secondary", help="Deletes all registered students and historic presence logs from your local machine database"):
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
             c.execute("DELETE FROM roster")
@@ -246,9 +272,9 @@ elif menu == "Master Roster Management":
             st.warning("All master roster listings and recorded presence tables have been purged.")
             st.rerun()
             
-    with c_display:
-        st.subheader("Current Registered Student Roster")
+    with col_preview:
+        st.subheader("Registered Roster Database View")
         conn = sqlite3.connect(DB_NAME)
-        registered_df = pd.read_sql_query("SELECT id as 'ID Index', name as 'Student Name' FROM roster ORDER BY name ASC", conn)
+        current_db_roster = pd.read_sql_query("SELECT id as 'ID Index', name as 'Student Name' FROM roster ORDER BY name ASC", conn)
         conn.close()
-        st.dataframe(registered_df, use_container_width=True, height=350)
+        st.dataframe(current_db_roster, use_container_width=True, height=400)
