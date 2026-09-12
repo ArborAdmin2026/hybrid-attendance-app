@@ -91,7 +91,7 @@ if uploaded_file is not None:
         df_raw = pd.read_csv(
             uploaded_file,
             header=None,
-            encoding="utf-8",
+            encoding="utf-16",
             sep = "\t",
             engine="python"
         )
