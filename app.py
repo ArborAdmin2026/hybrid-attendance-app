@@ -38,10 +38,8 @@ def parse_teams_duration(duration_str):
     if m_match:
         minutes = int(m_match.group(1))
     elif 'h' not in duration_str and 's' in duration_str:
-        # Check if single value exists representing minutes explicitly
         digit_match = re.search(r'^\s*(\d+)\s*s', duration_str)
         if not digit_match:
-            # Fallback to general integer tracing loops
             m_fallback = re.findall(r'\d+', duration_str)
             if m_fallback:
                 minutes = int(m_fallback[0])
@@ -52,37 +50,32 @@ st.set_page_config(page_title="Data Analytics Attendance Console", layout="wide"
 st.title("📊 Data Analytics Hybrid Attendance Engine")
 
 # --- SIDEBAR CONTROL MECHANISMS ---
-st.sidebar.header("🗓️ Session Parameters")
+st.sidebar.header("🗓️ Navigation & Options")
+menu = st.sidebar.radio("Go To Workspace:", ["Student Check-in Portal", "Logs & Teams Cleaner Pipeline", "Master Roster Management"])
+
 selected_date = st.sidebar.date_input("Class Session Date", datetime.now()).strftime("%Y-%m-%d")
 noise_filter = st.sidebar.slider("Minimum Online Minutes (Noise Threshold)", 0, 45, 10)
 
-# Main Application Menu Loop
-menu = st.tabs(["🚶‍♂️ Classroom Check-In", "💻 Process Teams File & Merge", "🗃️ Student Roster Setup"])
-
-# --- TAB 1: CLASSROOM REGISTRY ---
-with menu[0]:
+# --- WORKSPACE 1: STUDENT CHECK-IN PORTAL ---
+if menu == "Student Check-in Portal":
     st.header("🚶‍♂️ Physical Classroom Presence Check-In")
     st.caption("Mark offline students attending live in the room.")
     
     conn = sqlite3.connect(DB_NAME)
     roster_list = pd.read_sql_query("SELECT name FROM roster ORDER BY name ASC", conn)['name'].tolist()
-    
-    # Load today's presence hashes to keep selections active
     saved_offline = pd.read_sql_query("SELECT name FROM offline_logs WHERE date=?", conn, params=(selected_date,))['name'].tolist()
     conn.close()
     
     if not roster_list:
-        st.info("⚠️ Master student database profile is empty. Please navigate to the 'Student Roster Setup' tab first.")
+        st.info("⚠️ Master student database profile is empty. Please navigate to the 'Master Roster Management' tab first.")
     else:
         st.write("Select the boxes next to students physically present in class:")
         
-        # Build multi-column grids for clean rendering
         cols = st.columns(3)
         current_present = []
         
         for idx, student in enumerate(roster_list):
             with cols[idx % 3]:
-                # Automatically check the box if they were already saved for this date
                 is_checked = student in saved_offline
                 if st.checkbox(student, value=is_checked, key=f"off_{student}_{selected_date}"):
                     current_present.append(student)
@@ -90,7 +83,6 @@ with menu[0]:
         if st.button("💾 Save Classroom Attendance Logs", type="primary"):
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
-            # Clear previous offline states for this day to write clean updates
             c.execute("DELETE FROM offline_logs WHERE date=?", (selected_date,))
             for name in current_present:
                 c.execute("INSERT INTO offline_logs (date, name, status) VALUES (?, ?, 'Present (Offline)')", (selected_date, name))
@@ -98,8 +90,8 @@ with menu[0]:
             conn.close()
             st.success(f"Successfully recorded {len(current_present)} classroom students for {selected_date}!")
 
-# --- TAB 2: TEAMS PIPELINE ENGINE ---
-with menu[1]:
+# --- WORKSPACE 2: TEAMS PIPELINE ENGINE ---
+elif menu == "Logs & Teams Cleaner Pipeline":
     st.header("💻 Teams Log Cleaner & Multi-Stream Data Joiner")
     st.markdown("Upload the messy text/CSV dump exported directly from your Microsoft Teams session.")
     
@@ -107,12 +99,10 @@ with menu[1]:
     
     if uploaded_file is not None:
         try:
-            # Read files as raw strings to locate section markers programmatically
             raw_bytes = uploaded_file.read()
             raw_text = raw_bytes.decode("utf-8", errors="ignore")
             lines = raw_text.splitlines()
             
-            # Locate section bounds dynamically
             participant_line_idx = None
             activity_line_idx = None
             
@@ -125,40 +115,30 @@ with menu[1]:
             if participant_line_idx is None:
                 st.error("Error: Could not locate Section 2 ('2. Participants') inside the file.")
             else:
-                # Segment section text lines safely
                 end_idx = activity_line_idx if activity_line_idx else len(lines)
                 section_2_lines = lines[participant_line_idx+1 : end_idx]
                 
-                # Reconstruct localized clean string frames
                 clean_section_2 = "\n".join([l for l in section_2_lines if l.strip()])
                 
-                # Convert segmented TSV/CSV array frames into Pandas DataFrames
                 from io import StringIO
                 df_participants = pd.read_csv(StringIO(clean_section_2), sep='\t')
                 
-                # Handle layout variations gracefully if fields default to comma formats
-                if df_participants.shape[0] <= 1:
+                if df_participants.shape[1] <= 1:
                     df_participants = pd.read_csv(StringIO(clean_section_2), sep=',')
                 
-                # Standardize headers to handle hidden whitespaces
                 df_participants.columns = [str(c).strip() for c in df_participants.columns]
                 
-                # Verify structural integrity criteria
                 name_field = next((c for c in df_participants.columns if 'name' in c.lower()), None)
                 duration_field = next((c for c in df_participants.columns if 'dur' in c.lower()), None)
                 
                 if not name_field or not duration_field:
                     st.error(f"Failed to isolate Name or Duration fields. Headers found: {list(df_participants.columns)}")
                 else:
-                    # Execute local data cleaning pipelines
                     cleaned_rows = []
                     for _, row in df_participants.iterrows():
                         raw_name = str(row[name_field]).strip()
-                        
-                        # Strip standard Teams system-generated tags like "(Unverified)"
                         clean_name = re.sub(r'\s*\(unverified\)\s*', '', raw_name, flags=re.IGNORECASE).strip()
                         
-                        # Bypass organizer/session layout markers
                         if "meeting with data analytics" in clean_name.lower() or not clean_name:
                             continue
                             
@@ -172,12 +152,10 @@ with menu[1]:
                     
                     raw_parsed_df = pd.DataFrame(cleaned_rows)
                     
-                    # Group by student name to eliminate duplicates from dropped connections
                     online_summary = raw_parsed_df.groupby("Student Name").agg({
                         "Online Duration (Mins)": "sum"
                     }).reset_index()
                     
-                    # Apply operational noise filter threshold logic
                     online_summary["Status"] = online_summary["Online Duration (Mins)"].apply(
                         lambda x: "Present (Online)" if x >= noise_filter else "Absent / Dropped Noise"
                     )
@@ -187,33 +165,27 @@ with menu[1]:
                     st.subheader("🟢 Isolated Active Online Attendees")
                     st.dataframe(valid_online_df, use_container_width=True)
                     
-                    # --- STREAM JOINER LOGIC CONTROLLER ---
                     st.markdown("---")
                     st.subheader("🔀 Consolidated Hybrid Master Matrix")
                     
-                    # Retrieve classroom logs for this date from the local database
                     conn = sqlite3.connect(DB_NAME)
                     offline_df = pd.read_sql_query(
                         "SELECT name as 'Student Name', status as 'Status' FROM offline_logs WHERE date=?", 
                         conn, params=(selected_date,)
                     )
-                    # Pull master list to identify absent students
                     full_roster = pd.read_sql_query("SELECT name as 'Student Name' FROM roster", conn)
                     conn.close()
                     
                     offline_df["Online Duration (Mins)"] = 0
                     offline_df = offline_df[["Student Name", "Online Duration (Mins)", "Status"]]
                     
-                    # Combine online data streams and offline data streams
                     combined_present_df = pd.concat([valid_online_df, offline_df], ignore_index=True)
                     
-                    # Deduplicate entries if a student logged into Teams while in the room
                     combined_present_summary = combined_present_df.groupby("Student Name").agg({
                         "Online Duration (Mins)": "max",
                         "Status": lambda x: "Present (Hybrid/Both)" if len(set(x)) > 1 else list(x)[0]
                     }).reset_index()
                     
-                    # Left join against full roster to catch absolute absentees
                     master_attendance_sheet = pd.merge(full_roster, combined_present_summary, on="Student Name", how="left")
                     master_attendance_sheet["Status"] = master_attendance_sheet["Status"].fillna("Absent")
                     master_attendance_sheet["Online Duration (Mins)"] = master_attendance_sheet["Online Duration (Mins)"].fillna(0).astype(int)
@@ -221,7 +193,6 @@ with menu[1]:
                     
                     st.dataframe(master_attendance_sheet, use_container_width=True)
                     
-                    # Download trigger
                     csv_output = master_attendance_sheet.to_csv(index=False).encode('utf-8')
                     st.download_button(
                         label="📥 Download Unified Master Attendance CSV",
@@ -234,12 +205,12 @@ with menu[1]:
         except Exception as e:
             st.error(f"Parsing Fault Trace: {str(e)}. Please check your Teams CSV file configuration schema.")
 
-# --- TAB 3: ROSTER STORAGE DIRECTORY ---
-with menu[2]:
+# --- WORKSPACE 3: ROSTER STORAGE DIRECTORY ---
+elif menu == "Master Roster Management":
     st.header("🗃️ Master Class Roster Management")
     st.caption("Register student identity frames here so the system can audit absence logs correctly.")
     
-    c_import, c_display = st.columns(2)
+    c_import, c_display = st.columns()
     
     with c_import:
         st.subheader("Bulk Import Class List")
@@ -257,7 +228,7 @@ with menu[2]:
                         c.execute("INSERT INTO roster (name) VALUES (?)", (student_name,))
                         added_counter += 1
                     except sqlite3.IntegrityError:
-                        pass # Ignore duplicates quietly
+                        pass
                 conn.commit()
                 conn.close()
                 st.success(f"Successfully processed database updates. Registered {added_counter} new records.")
