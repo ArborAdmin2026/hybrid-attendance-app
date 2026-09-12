@@ -1,222 +1,191 @@
-import streamlit as st
 import pandas as pd
-import io
-import re
+import streamlit as st
+import sqlite3
+import qrcode
+from io import BytesIO
+from datetime import datetime
 
-# Set up page configurations with a modern layout
-st.set_page_config(
-    page_title="Hybrid Attendance Tracker", 
-    page_icon="📊", 
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Initialize SQLite database
+DB_NAME = "attendance_db.sqlite"
 
-# Custom CSS Injection for professional styling
-st.markdown("""
-    <style>
-    .header-banner {
-        background: linear-gradient(135deg, #4A00E0 0%, #8E2DE2 100%);
-        padding: 30px;
-        border-radius: 12px;
-        color: white;
-        margin-bottom: 25px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 28px !important;
-        font-weight: 700 !important;
-        color: #4A00E0 !important;
-    }
-    div[data-testid="stMetricLabel"] {
-        font-size: 14px !important;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS roster 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, email TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS attendance_logs 
+                 (date TEXT, name TEXT, email TEXT, platform TEXT, duration TEXT)''')
+    conn.commit()
+    conn.close()
 
-# Application Top Header Hero Block
-st.markdown("""
-    <div class="header-banner">
-        <h1 style='margin:0; font-size: 32px;'>📊 Hybrid Attendance Data Studio</h1>
-        <p style='margin:5px 0 0 0; opacity: 0.9; font-size: 16px;'>
-            Consolidate Teams digital exports and your Google Form responses into an elegant master list.
-        </p>
-    </div>
-""", unsafe_allow_html=True)
+init_db()
 
-# Professional Name Cleaning Engine Function
-def professional_name_cleaner(name_val):
-    if pd.isna(name_val):
-        return "Unknown Student"
-    text = str(name_val).strip()
-    text = re.sub(r'\s*[\(\\[][^\\]\)]*unverified[^\\]\)]*[\)\\]]', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\s*[\(\\[][^\\]\)]*guest[^\\]\)]*[\)\\]]', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\s*[\(\\[][^\\]\)]*external[^\\]\)]*[\)\\]]', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'[^a-zA-Z\s]', '', text)
-    text = " ".join(text.split())
-    return text.title()
+st.set_page_config(page_title="Secure Hybrid Attendance Engine", layout="wide")
 
-# Sidebar Area Configuration Panels
-st.sidebar.header("⚙️ App Configurations")
-class_duration = st.sidebar.number_input("Total Class Duration (mins):", min_value=1, value=60, step=5)
-min_benchmark_pct = st.sidebar.slider("Minimum Attendance Threshold (%):", min_value=0, max_value=100, value=75, step=5)
+# --- SECURE APPARATUS CONTROLLER ---
+# Change "admin123" to your preferred private master password
+ADMIN_PASSWORD = "admin123" 
 
-# Step-by-Step Tab Layout Engine Setup
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📁 Upload & Process", 
-    "🎟️ Google Form QR Kiosk",
-    "📊 Analytics Dashboard", 
-    "📋 Master Data Roster"
-])
+if 'authenticated' not in st.session_state:
+    st.session_state['authenticated'] = False
 
-# --- TAB 1: UPLOAD AND CONSOLIDATION HUBS ---
-with tab1:
-    st.subheader("Drag & Drop Attendance Documents")
-    st.markdown("Drop **both** your Microsoft Teams report logs and your Google Form response sheet (.csv/.xlsx) here together.")
-    uploaded_files = st.file_uploader("Upload files:", type=["xlsx", "csv"], accept_multiple_files=True, label_visibility="collapsed")
+# Sidebar Role Selector
+st.sidebar.title("🔐 Access Control")
+user_role = st.sidebar.selectbox("Select View Profile", ["Student Check-in Portal", "Trainer Dashboard Workspace"])
 
-    all_dataframes = []
-    
-    if uploaded_files:
-        for file in uploaded_files:
-            try:
-                fname_lower = file.name.lower()
+# --- TRAINER PASSWORD GATEFOOT ---
+if user_role == "Trainer Dashboard Workspace":
+    if not st.session_state['authenticated']:
+        st.subheader("Trainer Security Verification")
+        pwd_input = st.text_input("Enter Master Password:", type="password")
+        if st.button("Unlock Dashboard"):
+            if pwd_input == ADMIN_PASSWORD:
+                st.session_state['authenticated'] = True
+                st.success("Access Granted.")
+                st.rerun()
+            else:
+                st.error("Invalid Credentials. Access Denied.")
                 
-                # Check if it's the offline Google Form response file
-                if "offline" in fname_lower or "form" in fname_lower or "response" in fname_lower:
-                    if file.name.endswith('.xlsx'):
-                        df = pd.read_excel(file)
-                    else:
-                        df = pd.read_csv(file, encoding='utf-8', on_bad_lines='skip')
+    if st.session_state['authenticated']:
+        if st.sidebar.button("Logout from Session"):
+            st.session_state['authenticated'] = False
+            st.rerun()
+            
+        # --- TRAINER WORKSPACE CODE BLOCKS ---
+        st.title("🎛️ Trainer Master Control Panel")
+        menu = st.radio("Navigation Workspaces", ["Logs & Teams Cleaner Pipeline", "Master Roster Management"], horizontal=True)
+        
+        session_date = st.sidebar.date_input("Target Lecture Date", datetime.now()).strftime("%Y-%m-%d")
+        noise_threshold = st.sidebar.slider("Online Noise Aggregation Filter (Mins)", 5, 45, 15)
+
+        # 1. CLEANER VIEW
+        if menu == "Logs & Teams Cleaner Pipeline":
+            st.header("💻 Process Online Logs & Merge Streams")
+            uploaded_file = st.file_uploader("Drop Raw Teams CSV Export Here", type=["csv"])
+            cleaned_online = []
+            
+            if uploaded_file:
+                try:
+                    df = pd.read_csv(uploaded_file)
+                    df.columns = [c.strip() for c in df.columns]
                     
-                    df.columns = df.columns.str.strip().str.title()
-                    # Apply baseline full attendance metrics to offline students
-                    df['Duration (Minutes)'] = float(class_duration)
-                    df['Attendance Type'] = 'In-Person (Google Form)'
-                else:
-                    # Execute Microsoft Teams structural parser engine
-                    if file.name.endswith('.xlsx'):
-                        df = pd.read_excel(file)
-                    else:
-                        try:
-                            raw_bytes = file.read()
-                            file_text = raw_bytes.decode('utf-16')
-                        except Exception:
-                            try:
-                            # Fallback to UTF-8 standard text format profiles
-                                file_text = raw_bytes.decode('utf-8')
-                            except Exception:
-                            # Fail-safe backup decoder hook profile structure mapping
-                                file_text = raw_bytes.decode('latin-1')
+                    name_col = next((c for c in df.columns if 'name' in c.lower()), None)
+                    email_col = next((c for c in df.columns if 'email' in c.lower()), None)
+                    dur_col = next((c for c in df.columns if 'dur' in c.lower()), None)
+                    
+                    if name_col and dur_col:
+                        summary = df.groupby(name_col).agg({
+                            dur_col: 'sum',
+                            **( {email_col: 'first'} if email_col else {} )
+                        }).reset_index()
                         
-                        lines = file_text.splitlines()
-                        start_row = 0
-                        for idx, line in enumerate(lines):
-                            if "In-Meeting Activities" in line or "3. In-Meeting Activities" in line:
-                                start_row = idx + 1
-                                break
-                        clean_csv_text = "\n".join(lines[start_row:])
-                        sep_char = '\t' if start_row < len(lines) and '\t' in lines[start_row] else ','
-                        df = pd.read_csv(io.StringIO(clean_csv_text), sep=sep_char, on_bad_lines='skip')
-                    
-                    df.columns = df.columns.str.strip().str.title()
-                    df['Attendance Type'] = 'Digital (Teams)'
+                        summary.columns = ['Name', 'Duration', 'Email'] if email_col else ['Name', 'Duration']
+                        if 'Email' not in summary.columns:
+                            summary['Email'] = 'Online Student Log'
+                            
+                        summary['Status'] = summary['Duration'].apply(
+                            lambda x: "Present (Online)" if x >= noise_threshold else "Dropped / Noise"
+                        )
+                        
+                        valid_online = summary[summary['Status'] == "Present (Online)"]
+                        st.success(f"Log isolated successfully. Found {len(valid_online)} valid online attendees.")
+                        st.dataframe(valid_online)
+                        
+                        for _, row in valid_online.iterrows():
+                            cleaned_online.append((session_date, row['Name'], row['Email'], 'Online', f"{row['Duration']} mins"))
+                    else:
+                        st.error("Metrics structural lookup failed inside this CSV format.")
+                except Exception as e:
+                    st.error(f"Processing Error: {str(e)}")
+
+            # Local Database Fetch
+            conn = sqlite3.connect(DB_NAME)
+            offline_today = pd.read_sql_query("SELECT name, email, platform FROM attendance_logs WHERE date=? AND platform='Offline'", conn, params=(session_date,))
+            conn.close()
+
+            st.subheader(f"🚶‍♂️ Logged Classroom Registries for Today: {len(offline_today)}")
+            st.dataframe(offline_today)
+
+            if st.button("💾 Compile & Build Closed-Loop Report"):
+                conn = sqlite3.connect(DB_NAME)
+                c = conn.cursor()
+                c.execute("DELETE FROM attendance_logs WHERE date=? AND platform='Online'", (session_date,))
+                if cleaned_online:
+                    c.executemany("INSERT INTO attendance_logs VALUES (?, ?, ?, ?, ?)", cleaned_online)
+                conn.commit()
                 
-                # Global smart alignment dictionary maps
-                # Universal structural mapping to combine Teams and Google Form responses seamlessly
-                rename_dict = {
-                        'Full Name': 'Name', 'Display Name': 'Name', 'User Name': 'Name', 
-                    'Enter Your Full Name': 'Name', 'Enter Your Name': 'Name', 'Username': 'Name',
-                    'User Email': 'Email', 'Email Address': 'Email', 'Enter Your Email Address': 'Email', 'Email': 'Email',
-                    'Join Time': 'Join Time', 'Leave Time': 'Leave Time', 
-                    'Phone': 'Phone Number', 'Phone Number': 'Phone Number', 'Enter Your Phone Number': 'Phone Number'
-                }
+                master_df = pd.read_sql_query("SELECT date, name, email, platform, duration FROM attendance_logs WHERE date=?", conn, params=(session_date,))
+                conn.close()
+                
+                st.subheader("📋 Consolidated Master Attendance Matrix")
+                st.dataframe(master_df)
+                
+                st.download_button(
+                    label="📥 Export Master CSV Roster File",
+                    data=master_df.to_csv(index=False).encode('utf-8'),
+                    file_name=f"Master_Attendance_{session_date}.csv",
+                    mime="text/csv"
+                )
 
-           
-                df.rename(columns=rename_dict, inplace=True)
-                all_dataframes.append(df)
-                st.success(f"**Loaded Successfully:** {file.name}")
-            except Exception as e:
-                st.error(f"❌ **Error parsing {file.name}:** {e}")
+        # 2. ROSTER MANAGEMENT VIEW
+        elif menu == "Master Roster Management":
+            st.header("🗃️ Student Identity Database")
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.subheader("Register New Student")
+                n_name = st.text_input("Student Name")
+                n_email = st.text_input("Email ID")
+                if st.button("Save Entry to DB"):
+                    if n_name:
+                        try:
+                            conn = sqlite3.connect(DB_NAME)
+                            c = conn.cursor()
+                            c.execute("INSERT INTO roster (name, email) VALUES (?, ?)", (n_name, n_email))
+                            conn.commit()
+                            conn.close()
+                            st.success(f"Added {n_name} successfully.")
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.warning("Identity entry exists.")
+                    else:
+                        st.error("Name column cannot be blank.")
+            with c2:
+                st.subheader("Current Database Directory")
+                conn = sqlite3.connect(DB_NAME)
+                r_df = pd.read_sql_query("SELECT id, name, email FROM roster", conn)
+                conn.close()
+                st.dataframe(r_df, use_container_width=True)
 
-# --- TAB 2: STATIC GOOGLE FORM QR INTERFACE DISPATCH ---
-with tab2:
-    st.subheader("🎟️ Google Form In-Class Room Kiosk")
-    st.markdown("Project this tab onto your classroom screen. Students scan the QR code to load your form instantly.")
+# --- 4. SECURE CUSTOMER/STUDENT VIEW HUB ---
+else:
+    # Reset internal authentication state when moving out of admin screen
+    st.title("📱 Offline Student Kiosk Check-In Portal")
+    st.write("Please confirm your physical presence by choosing your name from the verified roster below.")
     
-    # ⚠️ CRITICAL EDIT: Paste your actual, full live Google Form sharing link inside the quotes below:
-    google_form_url = "https://forms.gle/v1ps237MJPncdQty8"
+    session_date = datetime.now().strftime("%Y-%m-%d")
     
-    st.markdown("#### 📢 Classroom Display Scanner")
+    conn = sqlite3.connect(DB_NAME)
+    students = pd.read_sql_query("SELECT name FROM roster", conn)['name'].tolist()
+    conn.close()
     
-    col_screen_1, col_screen_2 = st.columns(2)
-    with col_screen_1:
-        try:
-            # NATIVE LOADING: Reads your custom uploaded image file right from your GitHub folder
-            st.image("classroom_qr.png", caption="Scan with Phone Camera to open Google Form", width=280)
-        except Exception as e:
-            st.error("⚠️ Local QR code file 'classroom_qr.png' not found in GitHub repository directory.")
-            st.markdown(f"🔗 **Backup Form Hyperlink:** [Open Google Form Manually]({google_form_url})")
-
-    with col_screen_2:
-        st.markdown("##### 📝 Instructions for the Instructor:")
-        st.markdown("""
-        1. Overwrite the placeholder url in the code with your actual Google Form link.
-        2. Ensure your Google Form contains exactly **Name**, **Email**, and **Phone Number** fields.
-        3. Project this tab onto the classroom wall so physical students can check in.
-        4. Download your responses from the Google Forms panel as a CSV/Excel file, make sure the file name contains the word **'form'** or **'offline'**, and drop it into **Tab 1**!
-        """)
-# --- DOWNSTREAM CENTRAL DATA RECONSTRUCTION PIPELINE ---
-if uploaded_files and all_dataframes:
-    master_df = pd.concat(all_dataframes, ignore_index=True)
-    if 'Name' not in master_df.columns: master_df['Name'] = "Unknown Student"
-    master_df['Name'] = master_df['Name'].apply(professional_name_cleaner)
-    master_df = master_df[master_df['Name'].str.strip() != ""]
-    if 'Email' in master_df.columns: master_df['Email'] = master_df['Email'].astype(str).str.strip().str.lower()
-        
-    id_col = st.sidebar.selectbox("Deduplication Key:", options=master_df.columns.tolist(), index=0)
-    initial_count = len(master_df)
-    master_df.dropna(subset=[id_col], inplace=True)
-    
-    if 'Duration (Minutes)' not in master_df.columns: master_df['Duration (Minutes)'] = 0.0
-    if 'Duration' in master_df.columns:
-        def clean_duration_to_mins(val):
-            if pd.isna(val): return 0
-            val_str = str(val).lower().strip()
-            mins = 0
-            try:
-                h = re.search(r'(\d+)\s*h', val_str)
-                m = re.search(r'(\d+)\s*m', val_str)
-                s = re.search(r'(\d+)\s*s', val_str)
-                if h: mins += int(h.group(1)) * 60
-                if m: mins += int(m.group(1))
-                if s: mins += int(s.group(1)) / 60.0
-                return mins
-            except: return 0
-        master_df['Duration (Minutes)'] = master_df['Duration (Minutes)'].fillna(0) + master_df['Duration'].apply(clean_duration_to_mins).fillna(0)
-
-    agg_rules = {col: 'first' for col in master_df.columns if col != id_col}
-    if 'Duration (Minutes)' in agg_rules: agg_rules['Duration (Minutes)'] = 'sum'
-    master_df = master_df.groupby(id_col, as_index=False).agg(agg_rules)
-
-    master_df['Attendance %'] = ((master_df['Duration (Minutes)'] / class_duration) * 100).clip(upper=100.0).round(1)
-    master_df['Participation Status'] = master_df['Attendance %'].apply(lambda x: "🟢 Present" if x >= min_benchmark_pct else "🟡 Partial / Late Leave")
-    
-    # --- TAB 3: INSIGHTS & GRAPH VISUALISERS ---
-    with tab3:
-        st.subheader("📈 Quick Roster Insights")
-        chart_df = master_df.groupby('Attendance Type').size().reset_index(name='Total Count')
-        st.bar_chart(chart_df, x='Attendance Type', y='Total Count', color="#4A00E0")
-        
-    # --- TAB 4: UNIFIED GRID CONSOLE AND FINAL CONSOLIDATION DOWNLOAD ---
-    with tab4:
-        st.subheader("📋 Unified Master Hybrid Roster")
-        st.dataframe(master_df, use_container_width=True)
-        st.download_button(
-            label="📥 Download Combined Master Roster (CSV File)", 
-            data=master_df.to_csv(index=False).encode('utf-8'), 
-            file_name="final_hybrid_attendance_report.csv", 
-            mime="text/csv", 
-            use_container_width=True
-        )
+    if not students:
+        st.info("The Master Roster directory is currently empty. Ask the trainer to add students from the dashboard.")
+    else:
+        selected_student = st.selectbox("Select Your Registered Name:", ["-- Choose Name --"] + students)
+        if st.button("Submit Presence Verification"):
+            if selected_student != "-- Choose Name --":
+                conn = sqlite3.connect(DB_NAME)
+                c = conn.cursor()
+                
+                c.execute("SELECT email FROM roster WHERE name=?", (selected_student,))
+                res = c.fetchone()
+                email = res[0] if res else "Offline Registry"
+                
+                c.execute("SELECT * FROM attendance_logs WHERE date=? AND name=? AND platform='Offline'", (session_date, selected_student))
+                if c.fetchone():
+                    st.warning("Attendance confirmation already checked in for today's date!")
+                else:
+                    c.execute("INSERT INTO attendance_logs VALUES (?, ?, ?, 'Offline', 'Classroom')", (session_date, selected_student, email))
+                    conn.commit()
+                    st.success(f"Success! Attendance confirmed for {selected_student}.")
+                conn.close()
