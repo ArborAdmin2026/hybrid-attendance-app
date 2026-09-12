@@ -67,34 +67,32 @@ def convert_excel(df):
 
     return output.getvalue()
 
+import pandas as pd
+from io import StringIO
+
 def read_teams_file(uploaded_file):
 
-    encodings = [
-        "utf-16",
-        "utf-8",
-        "latin1",
-        "cp1252"
-    ]
+    # Read raw bytes
+    raw_data = uploaded_file.read()
 
-    for enc in encodings:
+    # Teams exports are often UTF-16
+    try:
+        text = raw_data.decode("utf-16")
+    except:
         try:
-            uploaded_file.seek(0)
-
-            return pd.read_csv(
-                uploaded_file,
-                header=None,
-                encoding=enc,
-                sep=None,
-                engine="python"
-            )
-
+            text = raw_data.decode("utf-8")
         except:
-            pass
+            text = raw_data.decode("latin1")
 
-    raise Exception(
-        "Could not read Teams attendance file."
-    )
+    # Split into tab-separated rows
+    rows = []
 
+    for line in text.splitlines():
+        rows.append(line.split("\t"))
+
+    df = pd.DataFrame(rows)
+
+    return df
 
 # -----------------------------
 # Main App
