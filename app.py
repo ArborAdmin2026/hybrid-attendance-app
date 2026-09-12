@@ -92,6 +92,7 @@ if uploaded_file is not None:
             uploaded_file,
             header=None,
             encoding="utf-8",
+            sep = "\t",
             engine="python"
         )
 
