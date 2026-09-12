@@ -2,47 +2,31 @@ import streamlit as st
 import pandas as pd
 import re
 from io import BytesIO
+from datetime import datetime
+import os
 
-# -----------------------------
-# Page Config
-# -----------------------------
-st.set_page_config(
-    page_title="Teams Attendance Tracker",
-    page_icon="📊",
-    layout="wide"
-)
+st.set_page_config(page_title="Hybrid Attendance Tracker", page_icon="📊", layout="wide")
 
-# -----------------------------
-# Helper Functions
-# -----------------------------
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
+STUDENT_FILE = os.path.join(DATA_DIR, "students.csv")
+OFFLINE_FILE = os.path.join(DATA_DIR, "offline_attendance.csv")
+
+
 def duration_to_minutes(duration):
     duration = str(duration)
-
-    hours = 0
-    minutes = 0
-    seconds = 0
-
     h = re.search(r"(\d+)h", duration)
     m = re.search(r"(\d+)m", duration)
     s = re.search(r"(\d+)s", duration)
-
-    if h:
-        hours = int(h.group(1))
-
-    if m:
-        minutes = int(m.group(1))
-
-    if s:
-        seconds = int(s.group(1))
-
-    return round(hours * 60 + minutes + seconds / 60, 2)
+    hours = int(h.group(1)) if h else 0
+    mins = int(m.group(1)) if m else 0
+    secs = int(s.group(1)) if s else 0
+    return round(hours * 60 + mins + secs / 60, 2)
 
 
 def clean_name(name):
-    name = str(name)
-    name = name.replace("(Unverified)", "")
+    name = str(name).replace("(Unverified)", "")
     name = re.sub(r"\s+", " ", name)
-
     return name.strip().title()
 
 
@@ -51,238 +35,140 @@ def attendance_status(percent):
         return "Present"
     elif percent >= 30:
         return "Partial"
-    else:
-        return "Absent"
+    return "Absent"
 
-
-def convert_excel(df):
-    output = BytesIO()
-
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(
-            writer,
-            index=False,
-            sheet_name="Attendance"
-        )
-
-    return output.getvalue()
-
-import pandas as pd
-from io import StringIO
 
 def read_teams_file(uploaded_file):
-
-    # Read raw bytes
-    raw_data = uploaded_file.read()
-
-    # Teams exports are often UTF-16
+    uploaded_file.seek(0)
+    data = uploaded_file.read()
     try:
-        text = raw_data.decode("utf-16")
+        text = data.decode("utf-16")
     except:
+        text = data.decode("latin1")
+
+    rows = [line.split("\t") for line in text.splitlines()]
+    return pd.DataFrame(rows)
+
+
+def excel_download(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
+    return output.getvalue()
+
+
+menu = st.sidebar.selectbox(
+    "Select Module",
+    ["Online Attendance", "Offline Check-In", "Trainer Dashboard"]
+)
+
+if menu == "Online Attendance":
+    st.title("📊 Teams Attendance Tracker")
+
+    uploaded_file = st.file_uploader("Upload Teams Attendance Report", type=["csv"])
+
+    if uploaded_file:
         try:
-            text = raw_data.decode("utf-8")
-        except:
-            text = raw_data.decode("latin1")
+            df_raw = read_teams_file(uploaded_file)
 
-    # Split into tab-separated rows
-    rows = []
+            start_idx = None
+            for i in range(len(df_raw)):
+                row_text = " ".join(df_raw.iloc[i].fillna("").astype(str))
+                if "First Join" in row_text and "Last Leave" in row_text:
+                    start_idx = i
+                    break
 
-    for line in text.splitlines():
-        rows.append(line.split("\t"))
+            if start_idx is None:
+                st.error("Participants section not found")
+                st.stop()
 
-    df = pd.DataFrame(rows)
+            header = df_raw.iloc[start_idx].tolist()
+            records = []
 
-    return df
+            for i in range(start_idx + 1, len(df_raw)):
+                row = df_raw.iloc[i].tolist()
+                txt = " ".join([str(x) for x in row])
+                if "In-Meeting Activities" in txt:
+                    break
+                records.append(row)
 
-# -----------------------------
-# Main App
-# -----------------------------
-st.title("📊 Teams Attendance Tracker")
+            participants = pd.DataFrame(records, columns=header)
+            participants = participants.dropna(subset=["Name"])
+            participants["Name"] = participants["Name"].apply(clean_name)
 
-st.write(
-    "Upload your Microsoft Teams Attendance Report CSV "
-    "and get a cleaned attendance register."
-)
+            participants = participants[
+                ~participants["Role"].astype(str).str.contains("Organiser|Organizer", case=False, na=False)
+            ]
 
-uploaded_file = st.file_uploader(
-    "Upload Teams Attendance CSV",
-    type=["csv"]
-)
+            participants["Minutes"] = participants["In-Meeting Duration"].apply(duration_to_minutes)
 
-if uploaded_file is not None:
+            result = participants.groupby("Name", as_index=False)["Minutes"].sum()
 
-    try:
+            session_duration = st.number_input("Session Duration (Minutes)", value=96)
 
-        # Read all rows without headers
-        df_raw = read_teams_file(uploaded_file)
+            result["Attendance %"] = round(result["Minutes"] / session_duration * 100, 2)
+            result["Status"] = result["Attendance %"].apply(attendance_status)
 
-        # Find Participants section
-        start_idx = None
+            st.dataframe(result, use_container_width=True)
 
-        for i in range(len(df_raw)):
-            row_text = " ".join(
-                df_raw.iloc[i].fillna("").astype(str)
+            st.download_button(
+                "Download Excel",
+                excel_download(result),
+                file_name="online_attendance.xlsx"
             )
 
-            if "First Join" in row_text and "Last Leave" in row_text:
-                start_idx = i
-                break
+        except Exception as e:
+            st.error(str(e))
 
-        if start_idx is None:
-            st.error(
-                "Participants section not found in the uploaded file."
-            )
-            st.stop()
+elif menu == "Offline Check-In":
+    st.title("📱 Offline Student Check-In")
 
-        # Extract header
-        header = df_raw.iloc[start_idx].tolist()
+    if not os.path.exists(STUDENT_FILE):
+        st.info("Upload students.csv in Trainer Dashboard first")
+    else:
+        students = pd.read_csv(STUDENT_FILE)
+        student = st.selectbox("Select Your Name", students["Name"])
 
-        data_rows = []
+        if st.button("✅ Check In"):
+            today = str(datetime.now().date())
 
-        for i in range(start_idx + 1, len(df_raw)):
+            if os.path.exists(OFFLINE_FILE):
+                attendance = pd.read_csv(OFFLINE_FILE)
+            else:
+                attendance = pd.DataFrame(columns=["Name", "Date", "Time"])
 
-            row = df_raw.iloc[i].tolist()
+            already = attendance[
+                (attendance["Name"] == student)
+                & (attendance["Date"] == today)
+            ]
 
-            row_text = " ".join(
-                [str(x) for x in row]
-            )
+            if len(already) > 0:
+                st.warning("Attendance already marked.")
+            else:
+                new_row = pd.DataFrame([
+                    {
+                        "Name": student,
+                        "Date": today,
+                        "Time": datetime.now().strftime("%H:%M:%S")
+                    }
+                ])
 
-            if "In-Meeting Activities" in row_text:
-                break
+                attendance = pd.concat([attendance, new_row], ignore_index=True)
+                attendance.to_csv(OFFLINE_FILE, index=False)
 
-            data_rows.append(row)
+                st.success(f"Attendance marked for {student}")
 
-        participants_df = pd.DataFrame(
-            data_rows,
-            columns=header
-        )
+else:
+    st.title("📈 Trainer Dashboard")
 
-        # Remove empty rows
-        participants_df = participants_df.dropna(
-            subset=["Name"]
-        )
+    master = st.file_uploader("Upload Student Master List", type=["csv"])
 
-        # Clean names
-        participants_df["Name"] = (
-            participants_df["Name"]
-            .astype(str)
-            .apply(clean_name)
-        )
+    if master:
+        df = pd.read_csv(master)
+        df.to_csv(STUDENT_FILE, index=False)
+        st.success("Student Master List Saved")
 
-        # Remove organizer
-        participants_df = participants_df[
-            ~participants_df["Role"]
-            .astype(str)
-            .str.contains(
-                "Organiser|Organizer",
-                case=False,
-                na=False
-            )
-        ]
-
-        # Duration conversion
-        participants_df["Minutes"] = (
-            participants_df["In-Meeting Duration"]
-            .apply(duration_to_minutes)
-        )
-
-        # Merge duplicate attendees
-        cleaned_df = (
-            participants_df.groupby(
-                "Name",
-                as_index=False
-            )["Minutes"]
-            .sum()
-        )
-
-        st.sidebar.header("Settings")
-
-        session_duration = st.sidebar.number_input(
-            "Session Duration (Minutes)",
-            min_value=1,
-            value=96
-        )
-
-        cleaned_df["Attendance %"] = round(
-            (cleaned_df["Minutes"] / session_duration) * 100,
-            2
-        )
-
-        cleaned_df["Status"] = cleaned_df[
-            "Attendance %"
-        ].apply(attendance_status)
-
-        cleaned_df = cleaned_df.sort_values(
-            by="Attendance %",
-            ascending=False
-        )
-
-        # Dashboard
-        st.header("📈 Dashboard")
-
-        total_students = len(cleaned_df)
-
-        present_count = (
-            cleaned_df["Status"] == "Present"
-        ).sum()
-
-        partial_count = (
-            cleaned_df["Status"] == "Partial"
-        ).sum()
-
-        absent_count = (
-            cleaned_df["Status"] == "Absent"
-        ).sum()
-
-        c1, c2, c3, c4 = st.columns(4)
-
-        c1.metric(
-            "Students",
-            total_students
-        )
-
-        c2.metric(
-            "Present",
-            present_count
-        )
-
-        c3.metric(
-            "Partial",
-            partial_count
-        )
-
-        c4.metric(
-            "Absent",
-            absent_count
-        )
-
-        # Chart
-        st.subheader("Attendance Status")
-
-        chart_data = (
-            cleaned_df["Status"]
-            .value_counts()
-        )
-
-        st.bar_chart(chart_data)
-
-        # Table
-        st.subheader("Cleaned Attendance")
-
-        st.dataframe(
-            cleaned_df,
-            use_container_width=True
-        )
-
-        # Download
-        excel_file = convert_excel(cleaned_df)
-
-        st.download_button(
-            label="📥 Download Excel",
-            data=excel_file,
-            file_name="cleaned_attendance.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-    except Exception as e:
-        st.error(f"Error: {e}")
+    if os.path.exists(OFFLINE_FILE):
+        attendance = pd.read_csv(OFFLINE_FILE)
+        st.dataframe(attendance, use_container_width=True)
+        st.metric("Offline Attendance Count", attendance["Name"].nunique())
