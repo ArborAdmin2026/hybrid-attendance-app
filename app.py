@@ -67,6 +67,34 @@ def convert_excel(df):
 
     return output.getvalue()
 
+def read_teams_file(uploaded_file):
+
+    encodings = [
+        "utf-16",
+        "utf-8",
+        "latin1",
+        "cp1252"
+    ]
+
+    for enc in encodings:
+        try:
+            uploaded_file.seek(0)
+
+            return pd.read_csv(
+                uploaded_file,
+                header=None,
+                encoding=enc,
+                sep=None,
+                engine="python"
+            )
+
+        except:
+            pass
+
+    raise Exception(
+        "Could not read Teams attendance file."
+    )
+
 
 # -----------------------------
 # Main App
@@ -88,13 +116,7 @@ if uploaded_file is not None:
     try:
 
         # Read all rows without headers
-        df_raw = pd.read_csv(
-            uploaded_file,
-            header=None,
-            encoding="utf-16",
-            sep = "\t",
-            engine="python"
-        )
+        df_raw = read_teams_file(uploaded_file)
 
         # Find Participants section
         start_idx = None
